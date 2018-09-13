@@ -1,0 +1,22 @@
+<template file="">
+  <layout name="title" index="0">
+    <placeholder name="title" index="0"/>
+    <placeholder name="subtitle" index="1"/>
+  </layout>
+
+  <layout name="section" index="2">
+    <placeholder name="title" index="0"/>
+    <placeholder name="subtitle" index="1"/>
+  </layout>
+
+  <layout name="1content" index="1">
+    <placeholder name="title" index="0"/>
+    <placeholder name="content" index="1"/>
+  </layout>
+
+  <layout name="2content" index="3">
+    <placeholder name="title" index="0"/>
+    <placeholder name="content0" index="1"/>
+    <placeholder name="content1" index="2"/>
+  </layout>
+</template>
