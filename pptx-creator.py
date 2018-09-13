@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 #
-# File: generate_pptx.py
+# File: pptx-creator.py
 # Author: amort
 #
 # Dependencies:
