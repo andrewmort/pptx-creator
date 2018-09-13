@@ -49,34 +49,25 @@ default_template = ""
 default_filename = "generate_pptx_{}.pptx".format(
         datetime.datetime.now().strftime("%Y%m%d"))
 
-# Power Point Slide Layout Indexes - Original without picture placeholder
-PPTX_LAYOUT_TITLE     = 0
-PPTX_LAYOUT_SECTION   = 2
-PPTX_LAYOUT_1CONTENT  = 1
-PPTX_LAYOUT_2CONTENT  = 3
-
-# Power Point Slide Placeholder Indexes - Original without picture placeholder
-PPTX_PLACEHOLDER_TITLE_TITLE          = 0
-PPTX_PLACEHOLDER_TITLE_SUBTITLE       = 13
-PPTX_PLACEHOLDER_SECTION_TITLE        = 12
-PPTX_PLACEHOLDER_SECTION_SUBTITLE     = 1
-PPTX_PLACEHOLDER_1CONTENT_TITLE       = 0
-PPTX_PLACEHOLDER_1CONTENT_CONTENT0    = 1
-PPTX_PLACEHOLDER_2CONTENT_TITLE       = 0
-PPTX_PLACEHOLDER_2CONTENT_CONTENT0    = 1
-PPTX_PLACEHOLDER_2CONTENT_CONTENT1    = 10
 
 def main():
     global verbose
 
     # **** Setup argument parser ****
-    parser = argparse.ArgumentParser(description="This program uses a pptx "
-            "definition file and creates a pptx starting from a pptx template.")
-    parser.add_argument("input",  help="pptx xml definition file")
-    parser.add_argument("-o", "--output", default=default_filename,
-            help="pptx output file")
-    parser.add_argument("-t", "--template", default=default_template,
-            help="pptx template file")
+    parser = argparse.ArgumentParser(description="" \
+        "This program creates a powerpoint (pptx) file based on an xml"      \
+        " definition file and a template. A template consists of a template" \
+        " pptx file and a template xml file, both of which typically reside" \
+        " in a template directory.")
+    parser.add_argument("input",  help="xml definition file")
+    parser.add_argument("-o", "--output", help="pptx output file")
+    parser.add_argument("-t", "--template",
+        help="template directory, containing pptx and xml files"\
+        "(specify individual file locations  with --pptx and --xml)")
+    parser.add_argument("-p", "--pptx",
+        help="template pptx file (overrides location of pptx from --template)")
+    parser.add_argument("-x", "--xml",
+        help="template xml file (overrides location of xml from --template)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -86,6 +77,12 @@ def main():
     filename_input    = args.input
     filename_output   = args.output
     filename_template = args.template
+    filename_pptx     = args.pptx
+    filename_xml      = args.xml
+
+    if (not filename_xml):
+        if (not filename_template):
+
 
 
     # **** Get input definition ****
@@ -143,7 +140,8 @@ def make_presentation(prs, xml_tree):
         prs_slides[slide_idx] = prs.slides.add_slide(prs_layout)
 
         # If slide has a label, add it to the references
-        if (label = xml_slide.get('label')):
+        label = xml_slide.get('label')
+        if (label):
             # Do not allow duplicate references
             if (label in slides_ref):
                 print("Error: Label {} on slide {} (layout {}) already "
@@ -152,24 +150,25 @@ def make_presentation(prs, xml_tree):
 
             prs_slides_ref[label] = slides[slide_idx]
 
-        slide_idx++
+        slide_idx += 1
 
     # Reset variable for loop
     slide_idx = 0
 
     # Loop through all xml elements in order
     for xml_child in xml_tree:
+        1+1
         # Slide definitions
-        if (xml_child.tag == 'slide'):
+        #if (xml_child.tag == 'slide'):
 
 
         # Variable definitions
-        elif (xml_child.tag == 'define'):
+        #elif (xml_child.tag == 'define'):
 
         # Invalid elements
-        else:
-            print("Error: Invalid element \"" + xml_child.tag + "\"")
-            raise
+        #else:
+            #print("Error: Invalid element \"" + xml_child.tag + "\"")
+            #raise
 
 
 def old_make_presentation(prs, lines):
