@@ -32,12 +32,12 @@
 #
 
 from pptx import Presentation
+import xml.etree.ElementTree as ET
 import datetime
 import os
 import re
 import argparse
 import sys
-import xml.etree.ElementTree as ET
 
 try:
     import pathlib
@@ -45,15 +45,22 @@ except ImportError:
     import pathlib2 as pathlib
 
 
-default_template = ""
-default_filename = "generate_pptx_{}.pptx".format(
-        datetime.datetime.now().strftime("%Y%m%d"))
-
-
 def main():
+    # Parse arguments to get paths
+    path_input, path_output, path_xml, path_pptx = parse_arguments()
+
+    # Interpret template xml file
+    template = get_template(path_xml)
+
+    # Parse input lines to create presentation
+    create_presentation(path_input, path_output, path_pptx, template)
+
+
+# Parse input arguments
+def parse_arguments():
     global verbose
 
-    # **** Setup argument parser ****
+    # Setup argument parser
     parser = argparse.ArgumentParser(description="" \
         "This program creates a powerpoint (pptx) file based on an xml"      \
         " definition file and a template. A template consists of a template" \
@@ -62,7 +69,9 @@ def main():
     parser.add_argument("input",  help="xml definition file")
     parser.add_argument("-o", "--output", help="pptx output file")
     parser.add_argument("-t", "--template",
-        help="template directory, containing pptx and xml files"\
+        help="template directory, containing pptx and xml files, "\
+        "file names should either be template.pptx and template.xml or "\
+        "<dirname>.pptx and <dirname>.xml"\
         "(specify individual file locations  with --pptx and --xml)")
     parser.add_argument("-p", "--pptx",
         help="template pptx file (overrides location of pptx from --template)")
@@ -71,8 +80,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-
-    # **** Get arguments ****
+    # Get arguments
     verbose           = args.verbose
     filename_input    = args.input
     filename_output   = args.output
@@ -80,37 +88,282 @@ def main():
     filename_pptx     = args.pptx
     filename_xml      = args.xml
 
-    if (not filename_xml):
-        if (not filename_template):
-
-
-
-    # **** Get input definition ****
+    # Get pathlib object for input
+    path_input = pathlib.Path(filename_input)
 
     if verbose:
-        print("INFO: Reading " + filename_input + "...")
+        print("INFO: Input path " + str(path_input) + ".")
 
-    # Read xml tree from file
-    try:
-        xml_tree = ET.parse(filename_input)
-    except:
-        print(sys.exc_info()[0])
-        raise
+    # Get pathlib object for output
+    if (filename_output):
+        path_output = pathlib.Path(filename_output)
+    else:
+        # Path to output file with same name as input file in pwd
+        path_output = path_input.with_suffix('.pptx').name
+
+    if verbose:
+        print("INFO: Output path " + str(path_output) + ".")
+
+    # Get pathlib object for template
+    if (filename_template):
+        path_template = pathlib.Path(filename_template)
+        template_names = (path_template.name, 'template')
+
+    # Get xml path
+    if (filename_xml):
+        path_xml = pathlib.Path(filename_xml)
+    else:
+        if (not path_template):
+            raise ValueError("No xml or template path specified!")
+
+        # Search for valid xml paths
+        for name in template_names:
+            path_temp = path_template.joinpath(name + '.xml')
+            if path_temp.exists():
+                path_xml = path_temp
+                break
+
+        # Unable to find valid xml file
+        if (not path_xml):
+            raise ValueError("No valid template xml file found!")
+
+    if verbose:
+        print("INFO: XML template path " + str(path_xml) + ".")
+
+    # Get pptx path
+    if (filename_pptx):
+        path_pptx = pathlib.Path(filename_pptx)
+    else:
+        if (not path_template):
+            raise ValueError("No pptx or template path specified!")
+
+        # Search for valid xml paths
+        for name in template_names:
+            path_temp = path_template.joinpath(name + '.pptx')
+            if path_temp.exists():
+                path_pptx = path_temp
+                break
+
+        # Unable to find valid xml file
+        if (not path_pptx):
+            raise ValueError("No valid template pptx file found!")
+
+    if verbose:
+        print("INFO: PPTX template path " + str(path_pptx) + ".")
+
+    return path_input, path_output, path_xml, path_pptx
+
+# Get template mapping from xml file
+def get_template(path_xml):
+    template = {}
+
+    # Open xml template definition file
+    xml_template = ET.parse(path_xml)
+
+    # Create map from child (c) to parent (p)
+    xml_parents = {c:p for p in xml_template.iter() for c in p}
+
+    template_idx = -1
+    layout_idx = -1
+    ph_idx = -1
+
+    # Iterate over xml elements to create template
+    for xml_elem in xml_template.iter():
+        if (xml_elem.tag == 'template'):
+            template_idx += 1
+
+            # Ensure template has no parent
+            try:
+                xml_parents[xml_elem]
+            except KeyError:
+                pass
+            else:
+                raise ValueError("Template should be top level element!")
+
+            if (template_idx > 0):
+                raise ValueError("Cannot have more than one template element!")
+
+        elif (xml_elem.tag == 'layout'):
+            # Update index values for error messages
+            layout_idx += 1
+            ph_idx = -1
+
+            layout = xml_elem.get("name")
+            index  = xml_elem.get("index")
+
+            if (not layout):
+                raise ValueError("Layout \"{}\" missing name attribute in xml "\
+                    "template file {}"\
+                    "".format(layout_idx, str(path_xml)))
+
+            if (xml_parents[xml_elem].tag != 'template'):
+                raise ValueError("Layout \"{}\" ({}) has parent node "\
+                    "\"{}\" and should have parent node \"template\" in xml "\
+                    " template file {}"\
+                    "".format(layout_idx, layout, xml_parents[xml_elem].tag,
+                        str(path_xml)))
+
+            if (not index):
+                raise ValueError("Layout \"{}\" ({}) missing index attribute "\
+                    "in xml template file {}"\
+                    "".format(layout_idx, layout, str(path_xml)))
+
+            # Associate index with layout name
+            template[layout] = {}
+            template[layout]["idx"] = index
+
+        elif (xml_elem.tag == 'placeholder'):
+            # Update index values for error messages
+            ph_idx += 1
+
+            ph     = xml_elem.get("name")
+            index  = xml_elem.get("index")
+
+            if (not ph):
+                raise ValueError("Placeholder \"{}\" in layout \"{}\" ({}) "\
+                    "missing name attribute in xml template file {}"\
+                    "".format(ph_idx, layout_idx, layout, str(path_xml)))
+
+            if (xml_parents[xml_elem].tag != 'layout'):
+                raise ValueError("Placeholder \"{}\" ({}) has parent node "\
+                    "\"{}\" and should have parent node \"layout\" in xml "\
+                    " template file {}"\
+                    "".format(ph_idx, ph, xml_parents[xml_elem].tag,
+                        str(path_xml)))
+
+            if (not index):
+                raise ValueError("Placeholder \"{}\" ({}) in layout \"{}\" "\
+                    "({}) missing index attribute in xml template file {}"\
+                    "".format(ph_idx, ph, layout_idx, layout, str(path_xml)))
+
+            # Associate index with ph name for current layout
+            template[layout]["ph"] = {}
+            template[layout]["ph"][ph] = index
+
+        else:
+            raise ValueError("Invalid tag \"{}\" in xml template file {}"\
+                "".format(xml_elem.tag, str(path_xml)))
+
+    # Invalid template file if no layout tags are found
+    if (layout_idx < 0):
+        raise ValueError("No layout tags found in xml template file {}"\
+            "".format(str(path_xml)))
+
+    return template
+
+def create_presentation(path_input, path_output, path_pptx, template):
+    # Create presentation
+    prs = Presentation(path_pptx)
+
+    # Open xml input file
+    xml_input = ET.parse(path_input)
+
+    # Pre-process xml input file
+    preprocess_presentation(prs, xml_input)
+
+# This functions
+#   - Create slides
+#   - Create slide references
+#   - Evaluate and replace variables
+#   - Orgnanize data
+def preprocess_presentation(prs, xml_input):
+    var_stack = []
+    elem_stack = []
+    input_stack = []
+
+    # Create map from child (c) to parent (p)
+    xml_parents = {c:p for p in xml_input.iter() for c in p}
+
+    level = -1
+
+    for child in xml_input.iter():
+        # **** Determine action based on location in stack ****
+
+        # First element in stack, add child
+        if (len(elem_stack) == 0):
+            append = 1
+
+        # Parent is last element in stack, add child
+        elif (xml_parents[child] == elem_stack[-1]):
+            append = 1
+
+        # Parent further up stack, remove children to parent, add child
+        else:
+            idx = elem_stack.index(xml_parents[child])
+            append = 0
 
 
-    # **** Create presentation ****
+        # **** Process action ****
 
-    # Create presentation using template
-    prs = Presentation(filename_template)
+        #
+        # If append
+        #   - add element to stack
+        #   - create new variable stack level
+        #   - add element and attributes to tree
+        # Else
+        #   - pop element stack to parent
+        #   - pop variable stack
+        #   - process each element for variables
+        #
 
-    # Parse input lines to create presentation
-    make_presentation(prs, xml_tree)
+        # Process actions
+        if (append):
+            elem_stack.append(child)
+            var_stack.append({})
+            level+=1
+        else:
+            for i in range(idx, len(elem_stack)-1):
+                elem_stack.pop()
+                var_stack.pop()
+            elem_stack.append(child)
+            var_stack.append({})
+            level = idx + 1
+
+        print ("  " * level + str(child))
+
+
+def oldnewnew():
+    # Initialize data strctures to hold input xml information
+    prs_slides = []
+    prs_slides_ref = {}
+    slides_layout = []
+    defines = {}
+
+    slide_idx = -1
+
+    # Create slides first so we can create links while adding content
+    for xml_slide in xml_input.iter('slide'):
+        # Update index values for error messages
+        slide_idx += 1
+
+        layout = xml_slide.get('layout')
+
+        if (not layout):
+            raise ValueError("Slide {} is missing layout attribute Layout {} missing name attribute in xml "\
+                "template file {}"\
+                "".format(layout_idx, str(path_xml)))
+
+        layout_idx = template[layout]["idx"]
+
+
+        if layout == "title":
+            slides_layout[slide_idx] = PPTX_LAYOUT_TITLE
+        elif layout == "section":
+            slides_layout[slide_idx] = PPTX_LAYOUT_SECTION
+        elif layout == "1content":
+            slides_layout[slide_idx] = PPTX_LAYOUT_1CONTENT
+        elif layout == "2content":
+            slides_layout[slide_idx] = PPTX_LAYOUT_2CONTENT
+        else:
+            print("Error: Slide {} does not specify a valid layout "
+                    "attribute \"{}\"".format(slide_idx+1,layout))
+            raise
 
     # Save presetnation as filename_output
-    prs.save(filename_output)
+    prs.save(path_output)
 
 # Use lines from input file to create presentation
-def make_presentation(prs, xml_tree):
+def oldnew_make_presentation(prs, xml_tree):
     prs_slides = []
     prs_slides_ref = {}
     slides_layout = []

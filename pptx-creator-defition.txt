@@ -1,0 +1,271 @@
+Overview
+  The pptx-creator program creates a power point (pptx) file based on an xml
+  definition file and a template. A template consists of a template pptx file
+  and a template xml file, both of which typically reside in a template
+  directory.
+
+  Directory Structure:
+  - input.xml
+  - template
+    * template.pptx
+    * template.xml
+
+  Run pptx-creator:
+  pptx-creator -o output.pptx -t template input.xml
+
+Template
+  A template consists of a template pptx file and a template xml file.
+
+  Template PPTX File
+    The template pptx file is a normal pptx presentation, which always
+    includes a theme (this can be a built-in theme or a user defined theme).
+    If the pptx file contains any slides, the slides added by the
+    pptx-creator will be appended to these (TODO - check this is true).
+
+  Template XML File
+    The template xml file is a standard XML which map slide layouts and
+    placeholders (the objects that hold content) indexes to user defined
+    names. These are the names that will then be referenced in the
+    pptx-creator input xml file.
+
+    Determination of this mapping between indexes and names must be done
+    manually. There is another program pptx-annotate that can be used to
+    read a template pptx file and create a pptx presentation with every
+    layout and placeholder annotated. A user can go through this pptx file
+    to get the index numbers of each layout and each placeholder that they
+    are interested in using to create the template xml file.
+
+    Template XML File Elements
+      <template>
+        The <template> element is the root of the template xml file.  All
+        layouts are sub-elements of a <template> node. There may only be
+        one <template> element per file.
+
+      <layout>
+        The <layout> element is the only permitted sub-element of a <template>
+        node. The <layout> element corresponds to a specific layout from
+        the theme used in the template pptx file.
+
+        required attributes:
+          name  :  user-defined name of the layout.
+          index :  index of the layout in teh template pptx file.
+
+        e.g. <layout name="section" index="2">
+
+      <placeholder>
+        The <placeholder> element is the only permitted sub-element of a
+        <layout> node. There may be multiple <placeholder> sub-elements
+        under one <layout> node. The <placeholder> element corresponds to
+        a specific placeholder in the parent layout from the theme used
+        in the template pptx file.
+
+        required attributes:
+          name  :  user-defined name of the placeholder
+          index :  index of the placeholder in the layout from the template
+                   pptx file
+
+        e.g. <placeholder name="subtitle" index="1">
+
+    An example template xml file is shown below for the blank theme:
+
+      <?xml version="1.0"?>
+      <template>
+        <layout name="title" index="0">
+          <placeholder name="title" index="0"/>
+          <placeholder name="subtitle" index="1"/>
+        </layout>
+
+        <layout name="section" index="2">
+          <placeholder name="title" index="0"/>
+          <placeholder name="subtitle" index="1"/>
+        </layout>
+
+        <layout name="1content" index="1">
+          <placeholder name="title" index="0"/>
+          <placeholder name="content" index="1"/>
+        </layout>
+
+        <layout name="2content" index="3">
+          <placeholder name="title" index="0"/>
+          <placeholder name="content0" index="1"/>
+          <placeholder name="content1" index="2"/>
+        </layout>
+      </template>
+
+Presentation
+  A presentation is defined in an xml file, here we call it input.xml.
+  This file uses the user-defined layout and placeholder names from the
+  template xml file to add content to a copy of the template pptx file.
+
+  Elements
+    <presentation>
+      The <presentation> element is the root of the input xml file. All slides
+      are sub-elements of a <presentation> node. There may only be one
+      <presentation> element per file.
+
+      Example:
+        <!-- start presentation -->
+        <presentation>
+
+          <!-- create slide with title layout  -->
+          <slide layout="title">
+
+            <!-- place text in the title placeholder -->
+            <placeholder name="title" type="text">
+
+              <!-- text to be placed in title-->
+              Title
+            </placeholder>
+          </slide>
+        </presentation>
+
+    <slide>
+      The <slide> element is a sub-element of the <presentation> node. Each
+      <slide> element creates a new slide, in the order defined, the
+      presentation.
+
+      required attributes:
+        layout :  name of the layout to use as defined in the template xml file
+
+      optional attributes:
+        label  :  a user-defined label that can be used to create links back
+                  to this slide from other slides in the presentation
+
+    <placeholder>
+      The <placeholder> element is a sub-element of a <slide> node.
+
+      required attributes:
+        name :   name of the placeholder to use as defined in the template
+                 xml file
+
+      optional attributes:
+        type  :  string that defines how to interpret the value of the
+                 <placeholder> node. This can also be specified as a
+                 sub-element. For descriptions about each type, refer to the
+                 element entries. If type is not specified as an attribute or
+                 a sub-element, the value of of the node will be interpreted
+                 as the default type: text.
+
+                 possible types:
+                   - text (default)
+                   - image
+                   - table
+
+    Type Elements
+      <text>
+        The <text> element is used to insert text. The value of the <text>
+        node will be evaluated as a string and inserted into the parent
+        node.
+
+        TODO: Add handling for lists (numbered and bulleted?)
+
+      <image>
+        The <image> element is used to insert an image. The value of the
+        <image> node will interpreted as a path to an image file. This will
+        will be embedded into the parent node.
+
+      <table>
+        The <table> element is used to insert a table. The table functionality
+        is defined below.
+
+    Variable Elements
+      <set>
+        The <set> element is used to set an internal variable. The name of
+        variable is specified with the required var attribute and the
+        value of the element sets the value. The variable definition is only
+        valid in the current scope, meaning that applies to any sub-elements
+        of the parent node occurring after the <set> element. Setting a
+        variable in the same scope (under the same parent node) as the
+        original definition will cause an error, use the <mod> element
+        instead. Setting a variable in a sub-element of a node where the
+        variable was previously defined will over the previous variable
+        setting in the current node and all any sub-elements until the program
+        returns to the parent node of the current node.
+
+        required attributes:
+          var  :  user-defined name of variable
+
+        Example:
+          <set var="a">a1</set>
+          <presentation>
+            <set var="b">b1</set>
+            <slide layout="title">
+              <set var="b">b2</set>
+              <placeholder name="title" type="text">
+                <get var="b"/>       <! -- set title to "b2" -->
+              </placeholder>
+              <mod var="b">b3</mod>  <! -- must modify to change value -->
+              <placeholder name="subtitle" type="text">
+                <get var="b"/>       <! -- set title to "b3" -->
+              </placeholder>
+              <mod var="a">a2</mod>  <! -- modify at scope where defined -->
+            </slide>
+            <slide layout="section">
+              <placeholder name="title" type="text">
+                <get var="b"/>       <! -- set title to "b1" -->
+              </placeholder>
+              <placeholder name="subtitle" type="text">
+                <get var="a"/>       <! -- set title to "a2" -->
+              </placeholder>
+            </slide>
+          </presentation>
+
+      <mod>
+        The <mod> element is used to modify the value of a variable that
+        has already been defined with the <set> element. The var attribute
+        must match the name of a variable that already exists or an error
+        will occur. The scope of the new value will be the same as the scope
+        of the variable before the <mod> element. Therefore, if the variable
+        was set by a parent node, the value persist until the parent node is
+        exited.
+
+        required attributes:
+          var  :  user-defined name of set variable
+
+      <get>
+        The <get> element is used to retrieve the current value of a variable.
+        The value of the variable will be determined by the current scope
+        and the scope of the initial <set> element. The <set> element
+        description includes more information about scopes.
+
+        required attributes:
+          var  :  user-defined name of set variable
+
+        The functionality of the <get> element can also be utilized with the
+        prepend and append attributes in any element. These attributes allow
+        the name of the variable to be specified as the attribute value and
+        cause the value of the variable to be prepended or appended to the
+        value of the element.
+
+    Attributes
+      Attributes are traditionally specified between '<' and '>' after the
+      element name. However, this prevents them from being modified by
+      variables. To get around this, attributes may also be specified
+      as sub-elements of the node they describe, in the form
+      <[attribute_name]>attribute_value</[attribute_name]>. This also allows
+      the use of the prepend and append attributes while creating the value
+      of the node's attribute value. If an attribute is specified in both
+      ways, the traditional attribute syntax will be used and the other
+      value will be assumed to be a sub-element of the node. If an expected
+      attribute is missing from the traditional syntax location and appears
+      as a sub-element, the sub-element will also be used as the attribute.
+
+      Example
+        <!-- Traditional attributes -->
+        <placeholder name="content" type="image">
+          image_path.png
+        </placeholder>
+
+        <!-- Sub-element attribute -->
+        <placeholder>
+          <name>content</name>
+          <type>image</type>
+          image_path.png
+        </slide>
+
+        <!-- Calling out image as element-->
+        <placeholder>
+          <name>content</name>
+          <image>image_path.png</image>
+        </slide>
+

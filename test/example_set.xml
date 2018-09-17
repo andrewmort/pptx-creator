@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<presentation>
+  <set var="var1">val1</set>
+  <set prefix="var1" var="var2">val2</set>
+  <set>
+    <var><get><var>var1<get var="var2"/></var></get>var3</var>
+    val3
+  </set>
+</presentation>

@@ -1,4 +1,5 @@
-<template file="">
+<?xml version="1.0"?>
+<template>
   <layout name="title" index="0">
     <placeholder name="title" index="0"/>
     <placeholder name="subtitle" index="1"/>

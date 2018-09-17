@@ -1,64 +1,46 @@
 <?xml version="1.0"?>
 <presentation>
-  <define name="path">./test/</define>
-  <define name="img_path"  prefix="path">images</define>
-  <define name="xlsx_path" prefix="path">example.xlsx</define>
-  <define name="data_path"><value name="path"/>data.csv</define>
+  <set name="path">./test/</set>
+  <set name="img_path"  prepend="path">images</set>
+  <set name="xlsx_path" prepend="path">example.xlsx</set>
+  <set name="data_path"><get name="path"/>data.csv</set>
 
   <!-- ################################### -->
   <!-- Title                               -->
   <!-- ################################### -->
 
   <slide label="title" layout="title">
-    <title>
-      <string>Example: pptx-creator</string>
-    </title>
-    <subtitle>
-      <string>Compiled on: <date/>.</string>
-    </subtitle>
+    <placeholder name="title" type="text">
+      Example: pptx-creator
+    </placeholder>
+    <placeholder name="subtitle">
+      <text>Compiled on: <date/>.</text>
+    </placeholder>
   </slide>
 
   <slide label="section" layout="section">
-    <title><string>Example Section</string></title>
+    <placeholder name="title">
+      <type>text</type>
+      Example Section
+    </placeholder>
   </slide>
 
   <slide label="example1" layout="1content">
-    <title><string>Example of 1 Content Slide</string></title>
-    <content>
-      <image prefix="img_path">violin.jpg</image>
-    </content>
+    <title>Example of 1 Content Slide</title>
+    <placeholder name="content">
+      <image prepend="img_path">violin.jpg</image>
+    </placeholder>
   </slide>
 
   <slide label="example2" layout="2content">
-    <title><string>Example of 2 Content Slide</string></title>
-    <content0>
-      <image prefix="img_path">veggies.jpg</image>
-    </content0>
-    <content1>
-      <image prefix="img_path">eggs.jpg</image>
-    </content1>
+    <placeholder name="title">
+      Example of 2 Content Slide
+    </placeholder>
+    <placeholder name="content0" type="image">
+      <get prefix="img_path"/>veggies.jpg
+    </placeholder>
+    <placeholder name="content1">
+      <image prepend="img_path">eggs.jpg</image>
+    </placeholder>
   </slide>
 </presentation>
-
-<template file="">
-  <layout name="title" index="0">
-    <placeholder name="title" index="0"/>
-    <placeholder name="subtitle" index="1"/>
-  </layout>
-
-  <layout name="section" index="2">
-    <placeholder name="title" index="0"/>
-    <placeholder name="subtitle" index="1"/>
-  </layout>
-
-  <layout name="1content" index="1">
-    <placeholder name="title" index="0"/>
-    <placeholder name="content" index="1"/>
-  </layout>
-
-  <layout name="2content" index="3">
-    <placeholder name="title" index="0"/>
-    <placeholder name="content0" index="1"/>
-    <placeholder name="content1" index="2"/>
-  </layout>
-</template>
