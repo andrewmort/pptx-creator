@@ -259,14 +259,14 @@ def create_presentation(path_input, path_output, path_pptx, template):
     xml_input = ET.parse(path_input)
 
     # Pre-process xml input file
-    preprocess_presentation(prs, xml_input)
+    preprocess_input(prs, xml_input)
 
 # This functions
 #   - Create slides
 #   - Create slide references
 #   - Evaluate and replace variables
 #   - Orgnanize data
-def preprocess_presentation(prs, xml_input):
+def preprocess_input(prs, xml_input):
     var_stack = []
     elem_stack = []
     input_stack = []
@@ -276,6 +276,7 @@ def preprocess_presentation(prs, xml_input):
 
     level = -1
 
+    # Process each child, creating tree of elements and attributes
     for child in xml_input.iter():
         # **** Determine action based on location in stack ****
 
@@ -289,9 +290,120 @@ def preprocess_presentation(prs, xml_input):
 
         # Parent further up stack, remove children to parent, add child
         else:
-            idx = elem_stack.index(xml_parents[child])
-            append = 0
+            append = -elem_stack.index(xml_parents[child])
 
+        preprocess_element(append, child, input_vars)
+
+    # After loop, ensure all elements have been processed
+    preprocess_element(-len(elem_stack), None, input_vars)
+
+
+def preprocess_push(tag, pre_vars):
+    tree_stack = pre_vars["tree_stack"]
+
+    # Create new tree element
+    new_elem = {}
+    new_elem["tag"] = tag
+    new_elem["data"] = []
+
+    # Add new element as data of element on top of stack
+    tree_stack[-1].append(new_elem)
+    tree_stack.append(new_elem["data"])
+
+def preprocess_pop(pre_vars)
+    tree_stack = pre_vars["tree_stack"]
+    var_stack  = pre_vars["var_stack"]
+
+    # Remove element from top of stack
+    old_elem = tree_stack.pop()
+
+    # Operate on element based on tag
+    if (old_elem["tag"] == "get")
+        name = [item["data"] for item in old_elem["data"] if item["tag"] == "name"]
+
+        if (len(name) != 1 or len(name[0]) != 1):
+            #TODO improve error message
+            raise ValueError("Must specify name with <get/> tag.")
+
+
+
+
+    elif 
+
+def get_varstac
+
+
+
+
+#
+# Function: preprocess_element
+# Date: 9/18/2018
+# Description: Process each presentation input xml element, creating a tree
+#   of elements and attributes. To keep track of parents and heirarchy,
+#   elements are added to a stack. The parameter append is used to operate
+#   on the stack.
+#
+# Parameters:
+#   append      when  1, element is child of previous element, add to stack
+#               when <0, indicates elements to pop to get child's parent
+#   child       current element to add to stack and process
+#   input_vars  array of variables that are used to process and create the tree
+#
+def preprocess_element(append, child, input_vars):
+    tree        = input_vars["tree"]
+    path        = input_vars["path"]
+    tree_stack  = input_vars["tree_stack"]
+    var_stack   = input_vars["var_stack"]
+
+    # Every element added as {elem_name, {data}}
+
+    # Add each element and all it's attributes to tree
+    if (append):
+        # Create new element
+        new_elem = []
+        new_elem["tag"] = child.tag
+        new_elem["data"] = {}
+
+        # Add new element under previous
+        tree_stack[-1].append(new_elem)
+        tree_stack.append(new_elem["data"])
+
+        # Get element's attributes
+        for item in child.items():
+            new_item = []
+            new_item["tag"] = item[0]
+            new_item["data"] = {item[1]}
+
+            tree_stack[-1].append(new_elem)
+
+
+
+
+
+
+    # Pop element off of stack
+    else:
+
+    # pop element
+    #   - remove element from element stack
+    #   - remove element location in tree from path
+    #   - dereference variables for gets, append, prepend
+    #   - set variable values for sets, mods
+    #   - add slide and layout to list of slides
+    #   - associate slide with tag/label
+
+    # push element
+    #   - add element to element stack
+    #   - add eleemnt and all args to tree
+    #   - add element to location in tree based on the path
+    #   - update element path
+
+
+    # Add element
+    if (append > 0):
+        elem_stack.append(child)
+        var_stack.append({})
+        level+=1
 
         # **** Process action ****
 
@@ -308,9 +420,6 @@ def preprocess_presentation(prs, xml_input):
 
         # Process actions
         if (append):
-            elem_stack.append(child)
-            var_stack.append({})
-            level+=1
         else:
             for i in range(idx, len(elem_stack)-1):
                 elem_stack.pop()
@@ -651,3 +760,33 @@ def insert_image(image, placeholder, slide):
 
 # Run program
 main()
+
+class Preprocessor:
+    """Preprocessor
+
+    This class is used to preprocess and store information from an input
+    XML file for the pptx-creator project.
+
+    """
+
+    def __init__(self):
+        self.xml_input = None
+
+    def parse(self, xml_path):
+        """parse(xml_path)
+
+        This function reads the xml file specified by xml_path and parses
+        it into the presentation tree that can be accessed by the other
+        class function
+        """
+
+        # Open xml input file
+        self.xml_path = xml_path
+        self.xml_input = ET.parse(xml_path)
+
+
+
+
+
+
+

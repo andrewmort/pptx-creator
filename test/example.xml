@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <presentation>
-  <set name="path">./test/</set>
-  <set name="img_path"  prepend="path">images</set>
-  <set name="xlsx_path" prepend="path">example.xlsx</set>
-  <set name="data_path"><get name="path"/>data.csv</set>
+  <set var="path">./test/</set>
+  <set var="img_path"  prepend="path">images</set>
+  <set var="xlsx_path" prepend="path">example.xlsx</set>
+  <set var="data_path"><get var="path"/>data.csv</set>
 
   <!-- ################################### -->
   <!-- Title                               -->
