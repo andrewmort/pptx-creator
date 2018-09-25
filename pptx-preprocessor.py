@@ -53,7 +53,7 @@ class PresentationPreprocessor:
 
         # Initialize parsing structures
         self.tree = []
-        self.var_stack = []
+        self.var_stack = VariableStack()
 
         # Create tree, starting at the root
         self._process_element(etree.getroot(), self.tree)
@@ -127,7 +127,7 @@ class PresentationPreprocessor:
         """
 
         # Append new dict onto the var_stack for the current scope variables
-        self.var_stack.append({})
+        self.var_stack.push()
 
 
     def _postprocess_element(self, elem_entry):
@@ -161,20 +161,60 @@ class PresentationPreprocessor:
         elif (elem_entry.tag == "set"):
             get_mod_set = elem_entry.tag
         elif (elem_entry.tag == "append"):
+            get_mod_set = "get"
             append_prepend = elem_entry.tag
         elif (elem_entry.tag == "prepend"):
+            get_mod_set = "get"
             append_prepend = elem_entry.tag
 
-        # Handle get/mod/set elements
-        if get_mod_set:
-            var_array = elem_entry.get_values(tag="var")
+        # Get variable name being retrieved or modified
+        # TODO -- continue working here
+        if append_prepend:
+            var = elem_entry.get_values(join=True)
+        else:
+            var_array = elem_entry.get_values(tag="var",join=True)
 
             # TODO add lines and path to element
-            if (len(var_array) != 1 or len(var_array[0] != 1):
-                raise ValueError("Invalid var attribute of {} element."\
+            if (len(var_array) != 1):
+                raise ValueError("Can only specifiy var once in {} element."\
                         "".format(get_mod_set))
 
-            var = var_array[0][0]
+            var = var_array[0]
+
+
+class VariableStack:
+    """ This is the variable stack class.
+
+    This class is used to create and manage the variable stack of the input
+    XML file. The variables are created and accessed in the XML using the
+    set, mod, and get elements and the prepend and append attributes.
+
+    """
+
+    def __init__(self):
+        self.var_stack = []
+
+    def push(self):
+        self.var_stack.append({})
+
+    def pop(self):
+        self.var_stack.pop()
+
+    def set(self, var, val):
+        var_stack[-1][var] = val
+
+    def mod(self, var, val):
+        find_dict(var)[var] = val
+
+    def get(self, var):
+        return find_dict(var)[var]
+
+    def find_dict(self, var):
+        for var_dict in self.var_stack:
+            if var in var_dict:
+                return var_dict
+
+        raise ValueError("Var {} not found in variable stack.".format(var)
 
 
 
@@ -263,7 +303,7 @@ class PreprocessorEntry:
 
         Perform text processing (e.g. remove leading and trailing spaces
         on string.  Then add a new PreprocessorValue entry to the current
-        PreprocessorEntry object's data array with the value of the 
+        PreprocessorEntry object's data array with the value of the
         processed text.
 
         Args:
@@ -283,32 +323,46 @@ class PreprocessorEntry:
         if (text != ""):
             self.data.append(PreprocessorValue(value=text))
 
-    def get_values(tag=None):
-        """ Return values of entry in an array.
+    def get_values(self, tag=None, join=False):
+        """ Return value(s) of entry
 
-        Get all PreprocessorValue objects in the current entry's data
-        array as an array of values. When tag is specified, return an
-        array of arrays of values. Each array entry in the outer array
-        is for an entry in the current PreprocessorEntry object matching
-        the tag, while the inner array is the array of all values
-        contained in that entry.
+        Get all values (PreprocessorValue object data) in the current
+        entry's data array. When a tag is specified, all value entries
+        associated with the tag are returned, as an array. When the
+        join argument is True, all the values associated with
+        a specific entry are joined together. Therefore, when
+        tag is unspecified and join is True, all the values of the current
+        entry are joined and returned as a single value. When join
+        is False, an array of values is returned. When tag is specified and
+        join is True, an array of the joined values for each entry
+        associated with the tag are returned. When the tag is specified
+        and join is False, an array of the arrays of values for each entry
+        associated with the tag are returned.
 
         Kwargs:
             tag: name of tag to retreive values from
+            join: indicates whether to join values
 
         Return:
-            array of values, if tag=None
-            array of arrays of values, otherwise
+            if tag=None and join=True:  joined values
+            if tag=None and join=False: array of values
+            if tag specified and join=True:  array of joined values
+            if tag specified and join=False: array of arrays of values
 
         """
 
         # Get values from entries matching tag in data array
         if tag:
-            return [pp.get_values() for pp in self.data
+            return [pp.get_values(join=join) for pp in self.data
                     if pp.which == "entry" and pp.tag == tag]
 
         # Get values in data array
-        return [pp.value for pp in self.data if pp.which == "value"]
+        values = [pp.value for pp in self.data if pp.which == "value"]
+
+        if join:
+            return ''.join(values)
+        else:
+            return values
 
 
 class PreprocessorValue:
@@ -329,6 +383,8 @@ class PreprocessorValue:
             self.value = value
 
 
+# From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
+#   6949395/is-there-a-way-to-get-a-line-number-from-an-elementtree-element
 class LineNumberingParser(ET.XMLParser):
     def _start_list(self, *args, **kwargs):
         # Here we assume the default XML parser which is expat
