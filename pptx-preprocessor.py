@@ -52,14 +52,14 @@ class PresentationPreprocessor:
         etree = ET.parse(source, parser=LineNumberingParser())
 
         # Initialize parsing structures
-        self.tree = []
+        self.tree = PreprocessorEntry("_root_",None)
         self.var_stack = VariableStack()
 
         # Create tree, starting at the root
         self._process_element(etree.getroot(), self.tree)
         pprint(self.tree)
 
-    def _process_element(self, elem, array, parent_elem=None):
+    def _process_element(self, elem, parent_entry, parent_elem=None):
         """ Process element and sub-elements.
 
         This function creates new PreprocessorEntry object for the specified
@@ -70,24 +70,24 @@ class PresentationPreprocessor:
 
         Args:
             elem: ElementTree element to be processed
-            array: Array where the new PreprocessEntry object is to be added
+            parent_entry: Parent entry that is to hold the new PreprocessorEntry
+                being created. The new PreprocessorEntry will be added to the
+                end of the parent's data array.
 
         Kwargs:
             parent_elem: This is set when the current element is a temporary
-                element representing an attribute of the parent element in
-                the XML file.
+                element created to represent an attribute of the parent element
+                in the XML file.
 
         """
 
         # Create entry for element
         if parent_elem:
-            elem_entry =
-                PreprocessEnty(elem.tag, elem=parent_elem, is_attrib=True)
+            elem_entry = PreprocessorEntry(elem.tag,
+                    parent=parent_entry, elem=parent_elem, is_attrib=True)
         else:
-            elem_entry = PreprocessEnty(elem.tag, elem=elem)
-
-        # Add entry to array
-        array.append(elem_entry)
+            elem_entry = PreprocessorEntry(elem.tag,
+                    parent=parent_entry, elem=elem)
 
         # Perform tasks on element before calling children
         self._preprocess_element(elem_entry)
@@ -161,17 +161,34 @@ class PresentationPreprocessor:
         elif (elem_entry.tag == "set"):
             get_mod_set = elem_entry.tag
         elif (elem_entry.tag == "append"):
-            get_mod_set = "get"
             append_prepend = elem_entry.tag
         elif (elem_entry.tag == "prepend"):
-            get_mod_set = "get"
             append_prepend = elem_entry.tag
 
+
         # Get variable name being retrieved or modified
-        # TODO -- continue working here
         if append_prepend:
+            # Get variable name and lookup value
             var = elem_entry.get_values(join=True)
-        else:
+            val = self.var_stack.get(var)
+
+            # Create new PreprocessorValue object and add parent
+            pp_val = PreprocessorValue(value=val)
+            pp_val.parent = elem_entry.parent
+
+            # Append or prepend data to parent's data array
+            if append_prepend == "append":
+                pp_val.parent.data.append(pp_val)
+            elif append_prepend == "prepend":
+                pp_val.parent.data.insert(0, pp_val)
+            else:
+                # Should never get here
+                assert False
+
+            # Delete entry from tree since we're evaluating it now
+            elem_entry.delete()
+
+        elif get_mod_set:
             var_array = elem_entry.get_values(tag="var",join=True)
 
             # TODO add lines and path to element
@@ -180,6 +197,18 @@ class PresentationPreprocessor:
                         "".format(get_mod_set))
 
             var = var_array[0]
+            val = elem_entry.get_values(join=True)
+
+            # Get, mod, set value
+            if (get_mod_set == "get"):
+                val = self.var_stack.get(var)
+                elem_entry.to_value(val)
+            elif (get_mod_set == "mod"):
+                val = self.var_stack.mod(var, val)
+                elem_entry.delete()
+            elif (get_mod_set == "set"):
+                val = self.var_stack.set(var, val)
+                elem_entry.delete()
 
 
 class VariableStack:
@@ -243,7 +272,7 @@ class PreprocessorEntry:
     # Used to differentiate PreprocessorEntry and PreprocessorValue objects
     which = "entry"
 
-    def __init__(self, tag, value=None, elem=None, is_attrib=False):
+    def __init__(self, tag, parent=None, value=None, elem=None, is_attrib=False):
         """ Initialize new PreprocessorEntry object.
 
         Create object with tag and empty data array. The capability is also
@@ -263,13 +292,14 @@ class PreprocessorEntry:
                 element tag or the attribute name.
 
         Kwargs:
+            parent: The parent entry that is to hold the newly created entry.
+                The new entry will be appended to the end of the data array
+                of the parent entry.
             value: The value associated with the entry, typically this is
                 used when adding an attribute entry so that both the name
                 and value of the attribute can be added at once.
-
             elem: The ElementTree element corresponding to this entry. This
                 is used for printing helpful error messages.
-
             is_attrib: True/False to indicate whether the entry is an
                 attribute or an element in the original XML file.
 
@@ -285,6 +315,11 @@ class PreprocessorEntry:
         if value:
             self.add_value(value)
 
+        # Add entry to end of data array for parent
+        if parent:
+            self.parent = parent
+            parent.data.append(self)
+
     def add_value(self, value):
         """ Add value to entry.
 
@@ -295,8 +330,7 @@ class PreprocessorEntry:
             value: value to be added to entry data array
 
         """
-
-        self.data.append(PreprocessorValue(value=value))
+        PreprocessorValue(self, value=value)
 
     def add_text(self, text):
         """ Add text to entry.
@@ -321,7 +355,7 @@ class PreprocessorEntry:
 
         # Only add text entry when text is not empty string
         if (text != ""):
-            self.data.append(PreprocessorValue(value=text))
+            self.add_entry(text)
 
     def get_values(self, tag=None, join=False):
         """ Return value(s) of entry
@@ -364,6 +398,31 @@ class PreprocessorEntry:
         else:
             return values
 
+    def delete(self):
+        """ Delete entry from parent's data array.
+
+        Effectively deletes the element from the whole entry tree by removing
+        the reference from the parent's data array.
+        """
+
+        self.parent.data.remove(self)
+
+    def to_value(self, val):
+        """ Convert the current entry to a value.
+
+        Delete the current PreprocessorEntry from the parent's data array
+        and replace it with a ProprocessorValue with the value specified
+        by val.
+        """
+
+        # Get current index and replace it with new PreprocessorValue object
+        idx = self.parent.data.index(self)
+        pp_val = PreprocessorValue(value=val)
+        self.parent.data.index[idx] = pp_val
+
+        # Update parent pointer in new pp_val object
+        pp_val.parent = self.parent
+
 
 class PreprocessorValue:
     """ This is the preprocess value class.
@@ -378,9 +437,31 @@ class PreprocessorValue:
     # Used to differentiate PreprocessorEntry and PreprocessorValue objects
     which = "value"
 
-    def __init__(self, value=None):
+    def __init__(self, parent=None, value=None):
+        """ Initialize new PreprocessorValue object.
+
+        Create object with parent and value. The value is stored in the
+        value variable for the object. The parent specifies the parent
+        PreprocessorEntry where the new new PreprocessorValue should be
+        added. This function will append the new PreprocessorValue to the
+        end of the parent's data array.
+        When value is set, a new PreprocessorValue object is created with
+
+        Kwargs:
+            parent: The parent entry that is to hold the newly created value.
+                The new value will be appended to the end of the data array
+                of the parent entry.
+            value: The value of the PreprocessorValue object.
+
+        """
+
         if value:
             self.value = value
+
+        # Add entry to end of data array for parent
+        if parent:
+            self.parent = parent
+            parent.data.append(self)
 
 
 # From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
