@@ -37,7 +37,7 @@
       Example of 2 Content Slide
     </placeholder>
     <placeholder name="content0" type="image">
-      <get prefix="img_path"/>veggies.jpg
+      <prepend>img_path</prepend>veggies.jpg
     </placeholder>
     <placeholder name="content1">
       <image prepend="img_path">eggs.jpg</image>

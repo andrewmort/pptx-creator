@@ -2,16 +2,17 @@
 
 # Force python XML parser not faster C accelerators
 # because we can't hook the C implementation
+import sys
 sys.modules['_elementtree'] = None
 
-from pptx import Presentation
 import xml.etree.ElementTree as ET
 import datetime
 import os
 import re
 import argparse
-import sys
-from pprint import pprint 
+from pptx import Presentation
+from pprint import pprint
+
 
 try:
     import pathlib
@@ -33,7 +34,7 @@ class PresentationPreprocessor:
     """
 
     def __init__(self, source=None):
-        if file:
+        if source:
             self.parse(source)
 
     def parse(self, source):
@@ -50,14 +51,6 @@ class PresentationPreprocessor:
         # Open xml input file
         self.source = source
         etree = ET.parse(source, parser=LineNumberingParser())
-
-        # Initialize parsing structures
-        self.tree = PreprocessorEntry("_root_",None)
-        self.var_stack = VariableStack()
-
-        # Create tree, starting at the root
-        self._process_element(etree.getroot(), self.tree)
-        pprint(self.tree)
 
     def _process_element(self, elem, parent_entry, parent_elem=None):
         """ Process element and sub-elements.
@@ -81,13 +74,16 @@ class PresentationPreprocessor:
 
         """
 
+
         # Create entry for element
-        if parent_elem:
+        if not parent_elem is None:
             elem_entry = PreprocessorEntry(elem.tag,
                     parent=parent_entry, elem=parent_elem, is_attrib=True)
         else:
             elem_entry = PreprocessorEntry(elem.tag,
                     parent=parent_entry, elem=elem)
+
+        print(repr(elem_entry))
 
         # Perform tasks on element before calling children
         self._preprocess_element(elem_entry)
@@ -96,7 +92,7 @@ class PresentationPreprocessor:
         for item in elem.items():
             attrib = ET.Element(item[0])
             attrib.text = item[1]
-            self._process_element(attrib, elem_entry.data, parent_elem=elem)
+            self._process_element(attrib, elem_entry, parent_elem=elem)
 
         # Add text as _value data under element
         elem_entry.add_text(elem.text)
@@ -104,7 +100,7 @@ class PresentationPreprocessor:
         # Process subelements
         for child in elem:
             # Process child element
-            self._process_element(child, elem_entry.data)
+            self._process_element(child, elem_entry)
 
             # Get text after sub element
             elem_entry.add_text(child.tail)
@@ -170,7 +166,13 @@ class PresentationPreprocessor:
         if append_prepend:
             # Get variable name and lookup value
             var = elem_entry.get_values(join=True)
-            val = self.var_stack.get(var)
+            try:
+                val = self.var_stack.get(var)
+            except ValueError as err:
+                raise ValueError("var name \"{}\" does not exist; must set "\
+                        "var before using \"{}\" element\n{}".format(var,
+                            append_prepend, self.error_info(elem_entry))) \
+                        from None
 
             # Create new PreprocessorValue object and add parent
             pp_val = PreprocessorValue(value=val)
@@ -189,15 +191,30 @@ class PresentationPreprocessor:
             elem_entry.delete()
 
         elif get_mod_set:
+
+            # Find variable name
             var_array = elem_entry.get_values(tag="var",join=True)
 
-            # TODO add lines and path to element
-            if (len(var_array) != 1):
-                raise ValueError("Can only specifiy var once in {} element."\
-                        "".format(get_mod_set))
+            if (len(var_array) == 0):
+                raise ValueError("cannot find name of var in \"{}\" "\
+                        "element\n{}".format(get_mod_set, 
+                            self.error_info(elem_entry)))
 
+            if (len(var_array) > 1):
+                raise ValueError("name of var specified {} times in \"{}\" "\
+                        "element; can only provide one var name\n{}"\
+                        "".format(len(var_array), get_mod_set,
+                            self.error_info(elem_entry)))
+
+            # Get variable and value
             var = var_array[0]
             val = elem_entry.get_values(join=True)
+
+            # Ensure variable name is not empty string
+            if (var == ""):
+                raise ValueError("var name cannot be empty string in {} "\
+                        "element\n{}".format(get_mod_set,
+                            self.error_info(elem_entry)))
 
             # Get, mod, set value
             if (get_mod_set == "get"):
@@ -209,6 +226,9 @@ class PresentationPreprocessor:
             elif (get_mod_set == "set"):
                 val = self.var_stack.set(var, val)
                 elem_entry.delete()
+
+    def error_info(self, elem_entry):
+        return "\tFile \"{}\" {}".format(self.source, elem_entry.error_info())
 
 
 class VariableStack:
@@ -230,21 +250,20 @@ class VariableStack:
         self.var_stack.pop()
 
     def set(self, var, val):
-        var_stack[-1][var] = val
+        self.var_stack[-1][var] = val
 
     def mod(self, var, val):
-        find_dict(var)[var] = val
+        self.find_dict(var)[var] = val
 
     def get(self, var):
-        return find_dict(var)[var]
+        return self.find_dict(var)[var]
 
     def find_dict(self, var):
         for var_dict in self.var_stack:
             if var in var_dict:
                 return var_dict
 
-        raise ValueError("Var {} not found in variable stack.".format(var)
-
+        raise ValueError("var \"{}\" not found in variable stack".format(var))
 
 
 class PreprocessorEntry:
@@ -320,6 +339,10 @@ class PreprocessorEntry:
             self.parent = parent
             parent.data.append(self)
 
+    def __repr__(self):
+        return "<{} '{}' at {}>"\
+                "".format( self.__class__.__name__, self.tag, hex(id(self)))
+
     def add_value(self, value):
         """ Add value to entry.
 
@@ -355,7 +378,7 @@ class PreprocessorEntry:
 
         # Only add text entry when text is not empty string
         if (text != ""):
-            self.add_entry(text)
+            self.add_value(text)
 
     def get_values(self, tag=None, join=False):
         """ Return value(s) of entry
@@ -418,11 +441,14 @@ class PreprocessorEntry:
         # Get current index and replace it with new PreprocessorValue object
         idx = self.parent.data.index(self)
         pp_val = PreprocessorValue(value=val)
-        self.parent.data.index[idx] = pp_val
+        self.parent.data[idx] = pp_val
 
         # Update parent pointer in new pp_val object
         pp_val.parent = self.parent
 
+    def error_info(self):
+        return "in element \"{}\", line {}"\
+                "".format(self.parent.tag, self.elem._start_line_number)
 
 class PreprocessorValue:
     """ This is the preprocess value class.
@@ -467,10 +493,10 @@ class PreprocessorValue:
 # From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
 #   6949395/is-there-a-way-to-get-a-line-number-from-an-elementtree-element
 class LineNumberingParser(ET.XMLParser):
-    def _start_list(self, *args, **kwargs):
+    def _start(self, *args, **kwargs):
         # Here we assume the default XML parser which is expat
         # and copy its element position attributes into output Elements
-        element = super(self.__class__, self)._start_list(*args, **kwargs)
+        element = super(self.__class__, self)._start(*args, **kwargs)
         element._start_line_number = self.parser.CurrentLineNumber
         element._start_column_number = self.parser.CurrentColumnNumber
         element._start_byte_index = self.parser.CurrentByteIndex
