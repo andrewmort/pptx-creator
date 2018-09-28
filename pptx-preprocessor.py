@@ -52,6 +52,14 @@ class PresentationPreprocessor:
         self.source = source
         etree = ET.parse(source, parser=LineNumberingParser())
 
+        # Initialize parsing structures
+        self.tree = PreprocessorEntry("_root_")
+        self.var_stack = VariableStack()
+
+        # Create tree, starting at the root
+        self._process_element(etree.getroot(), self.tree)
+        print(self.tree)
+
     def _process_element(self, elem, parent_entry, parent_elem=None):
         """ Process element and sub-elements.
 
@@ -82,8 +90,6 @@ class PresentationPreprocessor:
         else:
             elem_entry = PreprocessorEntry(elem.tag,
                     parent=parent_entry, elem=elem)
-
-        print(repr(elem_entry))
 
         # Perform tasks on element before calling children
         self._preprocess_element(elem_entry)
@@ -343,6 +349,20 @@ class PreprocessorEntry:
         return "<{} '{}' at {}>"\
                 "".format( self.__class__.__name__, self.tag, hex(id(self)))
 
+    def __str__(self):
+        ret  = "<{}: \'{}\'".format(self.which, self.tag)
+
+        if self.elem is None:
+            ret += ">"
+        else:
+            ret += ", line: {}>".format(self.elem._start_line_number)
+
+        for pp in self.data:
+            for line in str(pp).splitlines():
+                ret += "\n   {}".format(line)
+
+        return ret
+
     def add_value(self, value):
         """ Add value to entry.
 
@@ -488,6 +508,15 @@ class PreprocessorValue:
         if parent:
             self.parent = parent
             parent.data.append(self)
+
+    def __repr__(self):
+        return "<{} '{}' at {}>"\
+                "".format( self.__class__.__name__, self.value, hex(id(self)))
+
+    def __str__(self):
+        ret  = "<{}: \"{}\">".format(self.which, self.value)
+        return ret
+
 
 
 # From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
