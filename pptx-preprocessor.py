@@ -177,8 +177,7 @@ class PresentationPreprocessor:
             except ValueError as err:
                 raise ValueError("var name \"{}\" does not exist; must set "\
                         "var before using \"{}\" element\n{}".format(var,
-                            append_prepend, self.error_info(elem_entry))) \
-                        from None
+                            append_prepend, self.error_info(elem_entry)))
 
             # Create new PreprocessorValue object and add parent
             pp_val = PreprocessorValue(value=val)
@@ -522,14 +521,27 @@ class PreprocessorValue:
 # From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
 #   6949395/is-there-a-way-to-get-a-line-number-from-an-elementtree-element
 class LineNumberingParser(ET.XMLParser):
+    # Python3
     def _start(self, *args, **kwargs):
-        # Here we assume the default XML parser which is expat
-        # and copy its element position attributes into output Elements
+        # Here we assume the default XML parser
         element = super(self.__class__, self)._start(*args, **kwargs)
+        self._start_helper(element)
+        return element
+
+    # Python2
+    def _start_list(self, *args, **kwargs):
+        # Here we assume the default XML parser
+        element = super(self.__class__, self)._start_list(*args, **kwargs)
+        self._start_helper(element)
+        return element
+
+    # Function for both python3 and python2
+    def _start_helper(self, element):
+        # Copy element position attributes into output Elements
         element._start_line_number = self.parser.CurrentLineNumber
         element._start_column_number = self.parser.CurrentColumnNumber
         element._start_byte_index = self.parser.CurrentByteIndex
-        return element
+
 
     def _end(self, *args, **kwargs):
         element = super(self.__class__, self)._end(*args, **kwargs)
