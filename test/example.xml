@@ -25,6 +25,24 @@
     </placeholder>
   </slide>
 
+  <slide label="section" layout="1content">
+    <content type="table">
+      <row>
+        <cell>hi</cell>
+        <cell>bye</cell>
+      </row>
+      <row>
+        <cell/>
+        <cell>What's up?</cell>
+        <cell>More text</cell>
+      </row>
+      <row/>
+      <row>
+        <cell>a</cell>
+      </row>
+    </content>
+  </slide>
+
   <slide label="example1" layout="1content">
     <title>Example of 1 Content Slide</title>
     <placeholder name="content">

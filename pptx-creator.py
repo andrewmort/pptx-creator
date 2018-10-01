@@ -160,7 +160,7 @@ def get_template(path_xml):
     template = {}
 
     # Open xml template definition file
-    xml_template = ET.parse(path_xml)
+    xml_template = ET.parse(str(path_xml))
 
     # Create map from child (c) to parent (p)
     xml_parents = {c:p for p in xml_template.iter() for c in p}
@@ -262,7 +262,7 @@ class PresentationCreator:
 
     """
 
-    ph_types = {"text", "image"}
+    ph_types = {"text", "image", "table"}
 
 
     def __init__(self, path_pptx, template):
@@ -286,10 +286,10 @@ class PresentationCreator:
         self.output = path_output
 
         # Create presentation
-        self.prs = Presentation(self.path_pptx)
+        self.prs = Presentation(str(self.path_pptx))
 
         # Process the input xml file
-        self.ppp = PresentationPreprocessor(self.input)
+        self.ppp = PresentationPreprocessor(str(self.input))
 
         # Create slides and define slide references
         self._initialize_slides(self.prs, self.ppp.get_root())
@@ -304,7 +304,7 @@ class PresentationCreator:
                 print("  " + img)
 
         # Save file
-        self.prs.save(self.output)
+        self.prs.save(str(self.output))
 
         print("\nPresentation created: {}\n".format(self.output))
 
@@ -439,16 +439,16 @@ class PresentationCreator:
                     type_func = getattr(self, "_ph_" + type_vals[0])
                     type_func(ph, prs_ph, self.slides[i])
 
-    def _ph_text(self, entry, prs_ph, prs_slide):
-        """ Add text to the placeholder
+    def _prs_insert_text(self, entry, prs_object):
+        """ Add text to a shape
 
         Process text contained in the PreprocessorEntry and place it in the
-        prs_ph placeholder on the prs_slide slide.
+        prs_object containing a text_frame where the text should be inserted.
 
         Args:
             entry: PreprocessorEntry with text data
-            prs_ph: presentation placeholder where text is to be inserted
-            prs_slide: presentation slide containing placeholder
+            prs_object: presentation object with a text_frame where text is
+                to be inserted
 
         """
 
@@ -465,7 +465,22 @@ class PresentationCreator:
                 raise ValueError("invalid \"{}\" entry in text placeholder."\
                         "\n{}".format(sub.tag, self.ppp.error_info(sub)))
 
-        prs_ph.text = text
+        prs_object.text = text
+
+    def _ph_text(self, entry, prs_ph, prs_slide):
+        """ Add text to the placeholder
+
+        Process text contained in the PreprocessorEntry and place it in the
+        prs_ph placeholder on the prs_slide slide.
+
+        Args:
+            entry: PreprocessorEntry with text data
+            prs_ph: presentation placeholder where text is to be inserted
+            prs_slide: presentation slide containing placeholder
+
+        """
+
+        self._prs_insert_text(entry, prs_ph)
 
     def _ph_image(self, entry, prs_ph, prs_slide):
         """ Add image to the placeholder
@@ -520,6 +535,81 @@ class PresentationCreator:
         # remove placeholder from slide
         elem = prs_ph.element
         elem.getparent().remove(elem)
+
+    def _ph_table(self, entry, prs_ph, prs_slide):
+        """ Add table to the placeholder
+
+        Process the table description contained in the PreprocessorEntry
+        and place table on the prs_slide slide at the location of the
+        prs_ph placeholder.
+
+        The general purpose placeholder cannot hold a table in the current
+        version of the pptx module so a new table shape is added at the
+        position of the placeholder and the original placeholder is deleted.
+
+        Args:
+            entry: PreprocessorEntry with text data
+            prs_ph: presentation placeholder where text is to be inserted
+            prs_slide: presentation slide containing placeholder
+
+        """
+
+        table = {}
+        max_col = 0
+        cur_row = -1
+
+        # Iterate through rows
+        for row in entry.data:
+            if (row.which == "value"):
+                raise ValueError("invalid value \"{}\" in table "\
+                        "placeholder, expected row element.\n{}"\
+                        "".format(row.value, self.ppp.error_info(row)))
+
+            if (row.tag == "row"):
+                # Initialize new row in array
+                cur_row += 1
+                cur_col = -1
+                table[cur_row] = {}
+
+                # Iterate through columns
+                for col in row.data:
+                    if (col.which == "value"):
+                        raise ValueError("invalid value \"{}\" in table "\
+                                "placeholder, expected cell element.\n{}"\
+                                "".format(row.value, self.ppp.error_info(col)))
+
+                    # Add cell entry to table array
+                    if (col.tag == "cell"):
+                        cur_col += 1
+                        table[cur_row][cur_col] = col
+                    else:
+                        raise ValueError("invalid element \"{}\" in table "\
+                                "row, expected cell element.\n{}"\
+                                "".format(col.tag, self.ppp.error_info(col)))
+
+                # Update max_col count
+                if (cur_col > max_col):
+                    max_col = cur_col
+
+            else:
+                raise ValueError("invalid element \"{}\" in table, "\
+                        "expected row element.\n{}"\
+                        "".format(row.tag, self.ppp.error_info(row)))
+
+        # Create table on slide at location of placeholder
+        prs_table = prs_slide.shapes.add_table(cur_row+1, max_col+1,
+                prs_ph.left, prs_ph.top, prs_ph.width, prs_ph.height).table
+
+        # remove placeholder from slide
+        elem = prs_ph.element
+        elem.getparent().remove(elem)
+
+        # place text into table
+        for i in range(0,cur_row+1):
+            for j in range(0,max_col+1):
+                if (j >= len(table[i])):
+                    break
+                self._prs_insert_text(table[i][j], prs_table.cell(i,j))
 
 
 # Use lines from input file to create presentation
