@@ -6,30 +6,34 @@
 #
 # Dependencies:
 #   - python-pptx: Install with "pip install --user python-pptx"
-#   - pathlib2: (version 3.x only) Install with "pip install --user pathlib2"
+#   - pathlib2: (python2 only) Install with "pip install --user pathlib2"
 #
 # Versions History:
 #   Version 0.1 (7-30-2018)
 #       Initial version.
 #   Version 0.2 (9-12-2018)
 #       Change input file to xml format
-#       Add support for table generation
-#       Extract data from csv and xlsx files
+#       Add support for table generation -- TODO
 #
 # Description: This file takes an xml file with slide definitions and
 #   creates a powerpoint presentation. The file can specify the format
-#   of each slide, including slide title, text, images, etc. The 
+#   of each slide, including slide title, text, images, etc. The
 #   powerpoint is created using a template file, which can be specified
 #   on the command line.
 #
+# Example: ./pptx-creator.py -t test/templates/blank -o test/example.pptx test/example.xml
 #
-# Future Improvements (TODO):
-#   - Better defaults
-#       * use basic powerpoint template
-#   - Specify template definition file
-#       * Include mapping between name of slide layout and placeholders 
-#           in text file and the indexes used to accesses these elements
+# TODO
+#   - work on text spacing between different values
+#   - add table placeholder type
+#   - add bulleted list placeholder type
 #
+
+
+# Force python XML parser not faster C accelerators
+# because we can't hook the C implementation
+import sys
+sys.modules['_elementtree'] = None
 
 from pptx import Presentation
 import xml.etree.ElementTree as ET
@@ -37,13 +41,11 @@ import datetime
 import os
 import re
 import argparse
-import sys
 
 try:
     import pathlib
 except ImportError:
     import pathlib2 as pathlib
-
 
 def main():
     # Parse arguments to get paths
@@ -52,9 +54,9 @@ def main():
     # Interpret template xml file
     template = get_template(path_xml)
 
-    # Parse input lines to create presentation
-    create_presentation(path_input, path_output, path_pptx, template)
-
+    # Create presentation
+    pc = PresentationCreator(path_pptx, template)
+    pc.create_presentation(path_input, path_output)
 
 # Parse input arguments
 def parse_arguments():
@@ -210,7 +212,8 @@ def get_template(path_xml):
 
             # Associate index with layout name
             template[layout] = {}
-            template[layout]["idx"] = index
+            template[layout]["idx"] = int(index)
+            template[layout]["ph"] = {}
 
         elif (xml_elem.tag == 'placeholder'):
             # Update index values for error messages
@@ -237,8 +240,7 @@ def get_template(path_xml):
                     "".format(ph_idx, ph, layout_idx, layout, str(path_xml)))
 
             # Associate index with ph name for current layout
-            template[layout]["ph"] = {}
-            template[layout]["ph"][ph] = index
+            template[layout]["ph"][ph] = int(index)
 
         else:
             raise ValueError("Invalid tag \"{}\" in xml template file {}"\
@@ -251,225 +253,274 @@ def get_template(path_xml):
 
     return template
 
-def create_presentation(path_input, path_output, path_pptx, template):
-    # Create presentation
-    prs = Presentation(path_pptx)
+class PresentationCreator:
+    """ The presentation creator class is used to create a pptx presentation.
 
-    # Open xml input file
-    xml_input = ET.parse(path_input)
+    This class is used to create a pptx presentation for the pptx-creator
+    project. It utilizes the pptx module to modify a template pptx file
+    and create a presentation as specified in an input XML file.
 
-    # Pre-process xml input file
-    preprocess_input(prs, xml_input)
+    """
 
-# This functions
-#   - Create slides
-#   - Create slide references
-#   - Evaluate and replace variables
-#   - Orgnanize data
-def preprocess_input(prs, xml_input):
-    var_stack = []
-    elem_stack = []
-    input_stack = []
-
-    # Create map from child (c) to parent (p)
-    xml_parents = {c:p for p in xml_input.iter() for c in p}
-
-    level = -1
-
-    # Process each child, creating tree of elements and attributes
-    for child in xml_input.iter():
-        # **** Determine action based on location in stack ****
-
-        # First element in stack, add child
-        if (len(elem_stack) == 0):
-            append = 1
-
-        # Parent is last element in stack, add child
-        elif (xml_parents[child] == elem_stack[-1]):
-            append = 1
-
-        # Parent further up stack, remove children to parent, add child
-        else:
-            append = -elem_stack.index(xml_parents[child])
-
-        preprocess_element(append, child, input_vars)
-
-    # After loop, ensure all elements have been processed
-    preprocess_element(-len(elem_stack), None, input_vars)
+    ph_types = {"text", "image"}
 
 
-def preprocess_push(tag, pre_vars):
-    tree_stack = pre_vars["tree_stack"]
+    def __init__(self, path_pptx, template):
+        self.path_pptx   = path_pptx
+        self.template    = template
 
-    # Create new tree element
-    new_elem = {}
-    new_elem["tag"] = tag
-    new_elem["data"] = []
+    def create_presentation(self, path_input, path_output):
+        """ Create pptx presentation
 
-    # Add new element as data of element on top of stack
-    tree_stack[-1].append(new_elem)
-    tree_stack.append(new_elem["data"])
+        Create a new presentation based on the input from the path_input XML
+        file and save it to path_output.
 
-def preprocess_pop(pre_vars)
-    tree_stack = pre_vars["tree_stack"]
-    var_stack  = pre_vars["var_stack"]
+        Args:
+            path_input: path to input XML file
+            path_output: path to save pptx file
+        """
 
-    # Remove element from top of stack
-    old_elem = tree_stack.pop()
+        self.invalid_images = []
 
-    # Operate on element based on tag
-    if (old_elem["tag"] == "get")
-        name = [item["data"] for item in old_elem["data"] if item["tag"] == "name"]
+        self.input  = path_input
+        self.output = path_output
 
-        if (len(name) != 1 or len(name[0]) != 1):
-            #TODO improve error message
-            raise ValueError("Must specify name with <get/> tag.")
+        # Create presentation
+        self.prs = Presentation(self.path_pptx)
 
+        # Process the input xml file
+        self.ppp = PresentationPreprocessor(self.input)
 
+        # Create slides and define slide references
+        self._initialize_slides(self.prs, self.ppp.get_root())
 
+        # Process slides and fill fields
+        self._process_slides(self.prs, self.ppp.get_root())
 
-    elif 
+        # Report missing image paths
+        if (len(self.invalid_images) > 0):
+            print("\nInvalid Image Paths: ")
+            for img in self.invalid_images:
+                print("  " + img)
 
-def get_varstac
+        # Save file
+        self.prs.save(self.output)
 
+        print("\nPresentation created: {}\n".format(self.output))
 
+    def _initialize_slides(self, prs, root_entry):
+        """ Create empty slides and save references
 
+        Iterate through slide entries from the preprocessor and create
+        empty slides with the specified layouts and create a dictionary
+        of references for making links between slides. This must be
+        done before processing slides because all slides to be referenced
+        must be created before the link is added to a slide.
 
-#
-# Function: preprocess_element
-# Date: 9/18/2018
-# Description: Process each presentation input xml element, creating a tree
-#   of elements and attributes. To keep track of parents and heirarchy,
-#   elements are added to a stack. The parameter append is used to operate
-#   on the stack.
-#
-# Parameters:
-#   append      when  1, element is child of previous element, add to stack
-#               when <0, indicates elements to pop to get child's parent
-#   child       current element to add to stack and process
-#   input_vars  array of variables that are used to process and create the tree
-#
-def preprocess_element(append, child, input_vars):
-    tree        = input_vars["tree"]
-    path        = input_vars["path"]
-    tree_stack  = input_vars["tree_stack"]
-    var_stack   = input_vars["var_stack"]
+        Args:
+            prs: Presentation object where slides will be created
+            root_entry: root PreprocessorEntry object containing input tree
 
-    # Every element added as {elem_name, {data}}
+        """
 
-    # Add each element and all it's attributes to tree
-    if (append):
-        # Create new element
-        new_elem = []
-        new_elem["tag"] = child.tag
-        new_elem["data"] = {}
+        # Initialize data structures
+        self.slides      = []
+        self.layouts     = []
+        self.refs        = {}
 
-        # Add new element under previous
-        tree_stack[-1].append(new_elem)
-        tree_stack.append(new_elem["data"])
+        # Iterate through slides
+        for slide in root_entry.data:
+            # Get slide layout
+            layout_vals = slide.get_values(tag="layout", join=True)
 
-        # Get element's attributes
-        for item in child.items():
-            new_item = []
-            new_item["tag"] = item[0]
-            new_item["data"] = {item[1]}
+            if (len(layout_vals) > 1):
+                raise ValueError("slide may only have one layout attribute"\
+                        "\n{}".format(self.ppp.error_info(slide)))
 
-            tree_stack[-1].append(new_elem)
+            # Add layout to list and remove layout entry from slide
+            self.layouts.append(layout_vals[0])
+            slide.remove(tag="layout")
 
+            # Ceate new slide with layout
+            prs_layout = prs.slide_layouts[self.template[layout_vals[0]]["idx"]]
+            self.slides.append(prs.slides.add_slide(prs_layout))
 
+            # Get slide reference label
+            label_vals = slide.get_values(tag="label", join=True)
 
-
-
-
-    # Pop element off of stack
-    else:
-
-    # pop element
-    #   - remove element from element stack
-    #   - remove element location in tree from path
-    #   - dereference variables for gets, append, prepend
-    #   - set variable values for sets, mods
-    #   - add slide and layout to list of slides
-    #   - associate slide with tag/label
-
-    # push element
-    #   - add element to element stack
-    #   - add eleemnt and all args to tree
-    #   - add element to location in tree based on the path
-    #   - update element path
+            # Reference label points to current slide and remove label entry
+            if (len(label_vals) == 1):
+                self.refs[label_vals[0]] = self.slides[-1]
+                slide.remove(tag="label")
+            elif (len(label_vals) > 1):
+                raise ValueError("slide may only have one label attribute"\
+                        "\n{}".format(self.ppp.error_info(slide)))
 
 
-    # Add element
-    if (append > 0):
-        elem_stack.append(child)
-        var_stack.append({})
-        level+=1
+    def _process_slides(self, prs, root_entry):
+        """ Add data to the slides that were previously created
 
-        # **** Process action ****
+        Iterate through slide entries from the preprocessor and add
+        information to the slides created by the _initiliaze_slides
+        subroutine. This must be done is two steps because slides to be
+        referenced through links must be created before the links to
+        that slide is created.
 
-        #
-        # If append
-        #   - add element to stack
-        #   - create new variable stack level
-        #   - add element and attributes to tree
-        # Else
-        #   - pop element stack to parent
-        #   - pop variable stack
-        #   - process each element for variables
-        #
+        Args:
+            prs: Presentation object where slides will be created
+            root_entry: root PreprocessorEntry object containing input tree
 
-        # Process actions
-        if (append):
-        else:
-            for i in range(idx, len(elem_stack)-1):
-                elem_stack.pop()
-                var_stack.pop()
-            elem_stack.append(child)
-            var_stack.append({})
-            level = idx + 1
+        """
 
-        print ("  " * level + str(child))
+        # Iterate through slides
+        for i,slide in enumerate(root_entry.data):
 
+            # Iterate through placeholders
+            for ph in slide.data:
+                # Ensure no value entries directly under slide
+                if (ph.which != "entry"):
+                    raise ValueError("slide may only contain placeholder"\
+                            "elements"\
+                            "\n{}".format(self.ppp.error_info(ph)))
 
-def oldnewnew():
-    # Initialize data strctures to hold input xml information
-    prs_slides = []
-    prs_slides_ref = {}
-    slides_layout = []
-    defines = {}
+                # Get placeholder from slide
+                try:
+                    ph_idx = self.template[self.layouts[i]]["ph"][ph.tag]
+                except KeyError:
+                    raise ValueError("placeholder \"{}\" not found in "\
+                            "template\n{}"\
+                            "".format(ph.tag, self.ppp.error_info(ph)))
 
-    slide_idx = -1
+                prs_ph = self.slides[i].placeholders[ph_idx]
 
-    # Create slides first so we can create links while adding content
-    for xml_slide in xml_input.iter('slide'):
-        # Update index values for error messages
-        slide_idx += 1
+                # Determine if placeholder has a type
+                type_vals = ph.get_values(tag="type", join=True)
 
-        layout = xml_slide.get('layout')
+                if (len(type_vals) > 1):
+                    raise ValueError("placeholder may only have one type "\
+                            "attribute\n{}"\
+                            "".format(self.ppp.error_info(ph)))
+                else:
+                    # No type specified, find type elements under placeholder
+                    if (len(type_vals) == 0):
+                        found = 0
+                        for sub in ph.data:
+                            if (sub.which == "value"):
+                                continue
 
-        if (not layout):
-            raise ValueError("Slide {} is missing layout attribute Layout {} missing name attribute in xml "\
-                "template file {}"\
-                "".format(layout_idx, str(path_xml)))
+                            # Determine if entry is a type element
+                            for t in self.ph_types:
+                                if (sub.tag == t):
+                                    ph = sub
+                                    type_vals.insert(0,t)
+                                    found += 1
 
-        layout_idx = template[layout]["idx"]
+                        # No valid type found, assume data is text
+                        if (found == 0):
+                            type_vals.insert(0,"text")
 
+                        # Found more than one type, this is invalid
+                        elif (found > 1):
+                            raise ValueError("placeholder may only have one "\
+                                    "type\n{}".format(self.ppp.error_info(ph)))
 
-        if layout == "title":
-            slides_layout[slide_idx] = PPTX_LAYOUT_TITLE
-        elif layout == "section":
-            slides_layout[slide_idx] = PPTX_LAYOUT_SECTION
-        elif layout == "1content":
-            slides_layout[slide_idx] = PPTX_LAYOUT_1CONTENT
-        elif layout == "2content":
-            slides_layout[slide_idx] = PPTX_LAYOUT_2CONTENT
-        else:
-            print("Error: Slide {} does not specify a valid layout "
-                    "attribute \"{}\"".format(slide_idx+1,layout))
-            raise
+                    # Type was specified as an attribute of the placeholder
+                    else:
+                        # remove type entry from placeholder entry
+                        ph.remove(tag="type")
 
-    # Save presetnation as filename_output
-    prs.save(path_output)
+                    # Ensure class has type function
+                    if (not hasattr(self, "_ph_" + type_vals[0])):
+                        raise ValueError("placeholder type \"{}\" is not "\
+                                "valid\n{}".format(type_vals[0],
+                                    self.ppp.error_info(ph)))
+
+                    # Call type function
+                    type_func = getattr(self, "_ph_" + type_vals[0])
+                    type_func(ph, prs_ph, self.slides[i])
+
+    def _ph_text(self, entry, prs_ph, prs_slide):
+        """ Add text to the placeholder
+
+        Process text contained in the PreprocessorEntry and place it in the
+        prs_ph placeholder on the prs_slide slide.
+
+        Args:
+            entry: PreprocessorEntry with text data
+            prs_ph: presentation placeholder where text is to be inserted
+            prs_slide: presentation slide containing placeholder
+
+        """
+
+        text = ""
+
+        for sub in entry.data:
+            if (sub.which == "value"):
+                text += sub.value
+                continue
+
+            if (sub.tag == "date"):
+                text += datetime.datetime.now().strftime("%B %d, %Y")
+            else:
+                raise ValueError("invalid \"{}\" entry in text placeholder."\
+                        "\n{}".format(sub.tag, self.ppp.error_info(sub)))
+
+        prs_ph.text = text
+
+    def _ph_image(self, entry, prs_ph, prs_slide):
+        """ Add image to the placeholder
+
+        Process image path contained in the PreprocessorEntry and place image
+        on the prs_slide slide at the location of the prs_ph placeholder.
+
+        The general purpose placeholder cannot hold a picture in the current
+        version of the pptx module so a new picture shape is added at the
+        position of the placeholder and the original placeholder is deleted.
+
+        If the image path specified in input XML file is invlalid, a not
+        indicating this is added to the placeholder and the image is added
+        to an invalid image list.
+
+        Args:
+            entry: PreprocessorEntry with text data
+            prs_ph: presentation placeholder where text is to be inserted
+            prs_slide: presentation slide containing placeholder
+
+        """
+
+        path = ""
+
+        # Create path
+        for sub in entry.data:
+            if (sub.which == "value"):
+                path += sub.value
+                continue
+
+            # No valid sub elements in image tag
+            raise ValueError("invalid \"{}\" entry in image placeholder."\
+                    "\n{}".format(sub.tag, self.ppp.error_info(sub)))
+
+        if not pathlib.Path(path).exists():
+            self.invalid_images.append(path)
+            prs_ph.text = "Image Not Found: " + path
+            return
+
+        # add picture in a new picture shape at location of placeholder
+        pic = prs_slide.shapes.add_picture(path, prs_ph.left, prs_ph.top)
+
+        # calculate size to fit inside placeholder area
+        ratio = min(prs_ph.width  / float(pic.width), prs_ph.height / float(pic.height))
+
+        pic.height = int(pic.height * ratio)
+        pic.width  = int(pic.width  * ratio)
+
+        pic.left = int(prs_ph.left + ((prs_ph.width  - pic.width)/2))
+        pic.top  = int(prs_ph.top  + ((prs_ph.height - pic.height)/2))
+
+        # remove placeholder from slide
+        elem = prs_ph.element
+        elem.getparent().remove(elem)
+
 
 # Use lines from input file to create presentation
 def oldnew_make_presentation(prs, xml_tree):
@@ -758,35 +809,709 @@ def insert_image(image, placeholder, slide):
 
     return pic
 
-# Run program
-main()
-
-class Preprocessor:
-    """Preprocessor
+class PresentationPreprocessor:
+    """ Preprocess data for creating pptx presentation.
 
     This class is used to preprocess and store information from an input
-    XML file for the pptx-creator project.
+    XML file for the pptx-creator project. One purpose of the preprocessor
+    is to create a tree of PreprocessorEntry and PreprocessorValue objects
+    from the XML file. Another purpose is to evaluate and substitute
+    variables using the get, set, mod elements and the prepend, append
+    attributes.
+
+    """
+
+    def __init__(self, source=None):
+        self.tree = None
+
+        if source:
+            self.parse(source)
+
+    def parse(self, source):
+        """ Load external XML document into the preprocessor.
+
+        Load XML document and parse for pptx presentation format. A tree is
+        created to store all of the presentation information.
+
+        Args:
+            source: The source XML document
+
+        """
+
+        # Open xml input file
+        self.source = source
+        etree = ET.parse(source, parser=LineNumberingParser())
+
+        # Initialize parsing structures
+        self.tree = PreprocessorEntry("_root_")
+        self.var_stack = VariableStack()
+
+        # Create tree, starting at the root
+        self._process_element(etree.getroot(), self.tree)
+
+        # ensure tree contains root
+        if (len(self.tree.data) <= 0):
+            raise ValueError("no root entry found in \"{}\""\
+                    "".format(self.source))
+
+        # ensure only one root element
+        if (len(self.tree.data) > 1):
+            raise ValueError("presentation must be the only root element")
+
+        # ensure tree root is the presentation element
+        if (self.tree.data[0].tag != "presentation"):
+            raise ValueError("presentation must be the root element\n{}"
+                    "".format(self.error_info(self.tree.data[0])))
+
+    def get_root(self):
+        """ Get the root presentation entry of the tree
+
+        Return the PreprocessorEntry object representing the presentation
+        element of the input XML file.
+
+        Return:
+            root of input XML file
+
+        """
+
+        if self.tree is None:
+            raise ValueError("must parse input file before getting root\n")
+
+        return self.tree.data[0]
+
+    def _process_element(self, elem, parent_entry, parent_elem=None):
+        """ Process element and sub-elements.
+
+        This function creates new PreprocessorEntry object for the specified
+        element from the ElementTree, performs preprocessing tasks for
+        the element, recursively calls this function for each of the element's
+        attributes, recursively calls this function for each sub-element, and
+        performs any postprocessing tasks for the element.
+
+        Args:
+            elem: ElementTree element to be processed
+            parent_entry: Parent entry that is to hold the new PreprocessorEntry
+                being created. The new PreprocessorEntry will be added to the
+                end of the parent's data array.
+
+        Kwargs:
+            parent_elem: This is set when the current element is a temporary
+                element created to represent an attribute of the parent element
+                in the XML file.
+
+        """
+
+        # Create entry for element
+        if not parent_elem is None:
+            elem_entry = PreprocessorEntry(elem.tag,
+                    parent=parent_entry, elem=parent_elem, is_attrib=True)
+        else:
+            elem_entry = PreprocessorEntry(elem.tag,
+                    parent=parent_entry, elem=elem)
+
+        # Perform tasks on element before calling children
+        self._preprocess_element(elem_entry)
+
+        # Process each attribute as a sub-element
+        for item in elem.items():
+            attrib = ET.Element(item[0])
+            attrib.text = item[1]
+            self._process_element(attrib, elem_entry, parent_elem=elem)
+
+        # Add text as _value data under element
+        elem_entry.add_text(elem.text)
+
+        # Process subelements
+        for child in elem:
+            # Process child element
+            self._process_element(child, elem_entry)
+
+            # Get text after sub element
+            elem_entry.add_text(child.tail)
+
+        # Perform tasks on element after creating children
+        self._postprocess_element(elem_entry)
+
+    def _preprocess_element(self, elem_entry):
+        """ Perform preprocessing for element.
+
+        This is called by the _process_element function for each
+        element before its sub-elements are processed.
+
+        The following operations are performed by this function:
+            - push new scope onto the variable stack
+
+        Args:
+            elem_entry: element entry in tree
+
+        """
+
+        # Append new dict onto the var_stack for the current scope variables
+        self.var_stack.push()
+
+
+    def _postprocess_element(self, elem_entry):
+        """ Perform postprocessing for element.
+
+        This is called by the _process_element function for each
+        element after its sub-elements are processed.
+
+        The following operations are performed by this function:
+            - pop the current scope from the variable stack
+            - process any get, mod, set elements
+            - process any prepend, append elements (attributes)
+
+        Args:
+            elem_entry: element entry in tree
+
+        """
+
+        # Initialize values
+        get_mod_set = None
+        append_prepend = None
+
+        # Pop current dict to return to scope of parent element
+        self.var_stack.pop()
+
+        # Determine variable action
+        if (elem_entry.tag == "get"):
+            get_mod_set = elem_entry.tag
+        elif (elem_entry.tag == "mod"):
+            get_mod_set = elem_entry.tag
+        elif (elem_entry.tag == "set"):
+            get_mod_set = elem_entry.tag
+        elif (elem_entry.tag == "append"):
+            append_prepend = elem_entry.tag
+        elif (elem_entry.tag == "prepend"):
+            append_prepend = elem_entry.tag
+
+        # Get variable value and append/prepend
+        if append_prepend:
+            # Get variable name and lookup value
+            var = elem_entry.get_values(join=True)
+            try:
+                val = self.var_stack.get(var)
+            except ValueError as err:
+                raise ValueError("var name \"{}\" does not exist; must set "\
+                        "var before using \"{}\" element\n{}".format(var,
+                            append_prepend, self.error_info(elem_entry)))
+
+            # Create new PreprocessorValue object and add parent
+            pp_val = PreprocessorValue(value=val)
+            pp_val.parent = elem_entry.parent
+
+            # Append or prepend data to parent's data array
+            if append_prepend == "append":
+                pp_val.parent.data.append(pp_val)
+            elif append_prepend == "prepend":
+                pp_val.parent.data.insert(0, pp_val)
+            else:
+                # Should never get here
+                assert False
+
+            # Delete entry from tree since we're evaluating it now
+            elem_entry.delete()
+
+
+        # Get, modify, or set the value of variable
+        elif get_mod_set:
+            # Find variable name
+            var_array = elem_entry.get_values(tag="var",join=True)
+
+            if (len(var_array) == 0):
+                raise ValueError("cannot find name of var in \"{}\" "\
+                        "element\n{}".format(get_mod_set, 
+                            self.error_info(elem_entry)))
+
+            if (len(var_array) > 1):
+                raise ValueError("name of var specified {} times in \"{}\" "\
+                        "element; can only provide one var name\n{}"\
+                        "".format(len(var_array), get_mod_set,
+                            self.error_info(elem_entry)))
+
+            # Get variable and value
+            var = var_array[0]
+            val = elem_entry.get_values(join=True)
+
+            # Ensure variable name is not empty string
+            if (var == ""):
+                raise ValueError("var name cannot be empty string in {} "\
+                        "element\n{}".format(get_mod_set,
+                            self.error_info(elem_entry)))
+
+            # Get, mod, set value
+            if (get_mod_set == "get"):
+                val = self.var_stack.get(var)
+                elem_entry.to_value(val)
+            elif (get_mod_set == "mod"):
+                val = self.var_stack.mod(var, val)
+                elem_entry.delete()
+            elif (get_mod_set == "set"):
+                val = self.var_stack.set(var, val)
+                elem_entry.delete()
+
+        # Ensure presentation only has slides as children
+        elif (elem_entry.tag == "presentation"):
+
+            # Ensure there is at least one child
+            if (len(elem_entry.data) == 0):
+                raise ValueError("presentation must have at least one slide"\
+                        "element\n{}"\
+                        "".format(self.error_info(elem_entry)))
+
+            # Ensure _root_ is parent
+            if (elem_entry.parent.tag is None or
+                    elem_entry.parent.tag != "_root_"):
+                raise ValueError("presentation must be the root element\n{}"\
+                        "".format(self.error_info(elem_entry)))
+
+            # Ensure all children are slides
+            for child in elem_entry.data:
+                if (child.tag != "slide"):
+                    raise ValueError("presentation can only have slide"\
+                            "elements as children\n{}"\
+                            "".format(self.error_info(child)))
+
+        # Ensure slide's parent is presentation
+        elif (elem_entry.tag == "slide"):
+
+            # Ensure presentation is parent
+            if (elem_entry.parent.tag is None or
+                    elem_entry.parent.tag != "presentation"):
+                raise ValueError("slide element must have presentation"\
+                        "element as a parent\n{}"\
+                        "".format(self.error_info(elem_entry)))
+
+        # Ensure placeholder's parent is slide
+        elif (elem_entry.tag == "placeholder"):
+
+            # Ensure slide is parent
+            if (elem_entry.parent.tag is None or
+                    elem_entry.parent.tag != "slide"):
+                raise ValueError("placeholder element can only have slide"\
+                        "element as a parent\n{}"\
+                        "".format(self.error_info(elem_entry)))
+
+            # Convert placeholder tag to the name of the placeholder
+            name_vals = elem_entry.get_values(tag="name", join=True)
+
+            if (len(name_vals) > 1):
+                raise ValueError("placeholder may only have one name attribute"\
+                        "\n{}".format(self.error_info(elem_entry)))
+
+            elem_entry.tag = name_vals[0]
+            elem_entry.remove(tag="name")
+
+    def error_info(self, elem_entry):
+        return "\tFile \"{}\" {}".format(self.source, elem_entry.error_info())
+
+
+class VariableStack:
+    """ This is the variable stack class.
+
+    This class is used to create and manage the variable stack for the input
+    XML file. The variables that are defined in a scope are all stored in a
+    single dictionary for that scope. A new sub-scope can be created by
+    "push"-ing a new dictionary to the end of the variable stack. Any variable
+    defined in this new scope will be available in all sub-scopes unless they
+    are "set" in a sub-scope. In this case, the new value will be returned
+    until this sub-scope is "pop"-ed and then the previous value will be
+    returned. A "mod" can be used to modify the value of a variable in the
+    current scope or any parent scopes, allow the value to be retained after
+    the sub-scope is "pop"-ed.
 
     """
 
     def __init__(self):
-        self.xml_input = None
+        self.var_stack = []
 
-    def parse(self, xml_path):
-        """parse(xml_path)
+    def push(self):
+        """ Add new level to variable stack
 
-        This function reads the xml file specified by xml_path and parses
-        it into the presentation tree that can be accessed by the other
-        class function
+        Add a new dictionary to the top of the variable stack to create a new
+        variable scope.
+
         """
 
-        # Open xml input file
-        self.xml_path = xml_path
-        self.xml_input = ET.parse(xml_path)
+        # Add new dictionary to end of var_stack
+        self.var_stack.append({})
+
+    def pop(self):
+        """ Remove level from variable stack
+
+        Remove top dictionary from the variable stack to return to the previous
+        variable scope.
+
+        """
+
+        # Remove dictionary from end of var_stack
+        self.var_stack.pop()
+
+    def set(self, var, val):
+        """ Set variable value in the current scope
+
+        Add new variable entry to the top dictionary of the variable stack,
+        which will create a definition of the variable in the current scope
+
+        Args:
+            var: name of variable
+            val: value of variable
+
+        """
+
+        # Set variable value to the dictionary at the end of var_stack
+        self.var_stack[-1][var] = val
+
+    def mod(self, var, val):
+        """ Modify the value of the variable
+
+        Find a previously defined variable in the dictionary closest to the
+        top of the variable stack and modify the value.
+
+        Args:
+            var: name of variable
+            val: new value of variable
+        """
+
+        # Change value of variable
+        self.find_dict(var)[var] = val
+
+    def get(self, var):
+        """ Get the value of the variable
+
+        Find a previously defined variable in the dictionary closest to the
+        top of the variable stack and return the value.
+
+        Args:
+            var: name of variable
+
+        Return:
+            value of variable
+
+        """
+
+        # Get value of variable
+        return self.find_dict(var)[var]
+
+    def find_dict(self, var):
+        """ Get the dictionary containing the specified variable
+
+        Find a previously defined variable by searching through each dictionary
+        from the top of the variable stack to the bottom. When the variable is
+        found, the dictionary containing the variable is returned.
+
+        Args:
+            var: name of variable
+
+        Return:
+            dictionary containing variable
+
+        """
+
+        # Search through variable stack
+        for var_dict in reversed(self.var_stack):
+            if var in var_dict:
+                return var_dict
+
+        # Variable not found
+        raise ValueError("var \"{}\" not found in variable stack".format(var))
 
 
+class PreprocessorEntry:
+    """ This is the preprocess entry class.
+
+    The preprocess entry object is used by the PresentationPreprocessor
+    class to hold elements and attributes in a standard data structure.
+
+    An entry has a tag attribute and an entries attribute.
+        - tag:  string containing attribute or element name from XML file
+        - data: array of additional entries or values
+
+    An object can be constructed with or without a value, as shown below
+        entry = PreprocessorEntry("my_tag")
+            Returns:
+                entry.tag  == "my_tag"
+                entry.data == []
+
+        entry = PreprocessorEntry("my_tag",value="my_value")
+            Returns:
+                entry.tag  == "my_tag"
+                entry.data[0].value == "my_value"
+
+    """
+    # Used to differentiate PreprocessorEntry and PreprocessorValue objects
+    which = "entry"
+
+    def __init__(self, tag, parent=None, value=None, elem=None, is_attrib=False):
+        """ Initialize new PreprocessorEntry object.
+
+        Create object with tag and empty data array. The capability is also
+        provided to add a value associated with the enty, by setting value.
+        When value is set, a new PreprocessorValue object is created with
+        the value and added as the first entry of the ProprocessorEntry
+        data array.
+
+        The caller also has the option to associate an ElementTree element
+        with this entry using the elem keyword argument. This can be done
+        to provide clearer error messages and to aid in debugging. The
+        is_attrib keyword argument can be used to indicate whether this entry
+        is the element itself or an attribute of the element.
+
+        Args:
+            tag: The name of the tag for the entry which corresponds to the
+                element tag or the attribute name.
+
+        Kwargs:
+            parent: The parent entry that is to hold the newly created entry.
+                The new entry will be appended to the end of the data array
+                of the parent entry.
+            value: The value associated with the entry, typically this is
+                used when adding an attribute entry so that both the name
+                and value of the attribute can be added at once.
+            elem: The ElementTree element corresponding to this entry. This
+                is used for printing helpful error messages.
+            is_attrib: True/False to indicate whether the entry is an
+                attribute or an element in the original XML file.
+
+        """
+
+        # Initialize data
+        self.tag = tag
+        self.data = []
+        self.elem = elem
+        self.is_attrib = is_attrib
+
+        # When value is specified create PreprocessorValue in data array
+        if value:
+            self.add_value(value)
+
+        # Add entry to end of data array for parent
+        if parent:
+            self.parent = parent
+            parent.data.append(self)
+
+    def __repr__(self):
+        return "<{} '{}' at {}>"\
+                "".format( self.__class__.__name__, self.tag, hex(id(self)))
+
+    def __str__(self):
+        ret  = "<{}: \'{}\'".format(self.which, self.tag)
+
+        if self.elem is None:
+            ret += ">"
+        else:
+            ret += ", line: {}>".format(self.elem._start_line_number)
+
+        for pp in self.data:
+            for line in str(pp).splitlines():
+                ret += "\n   {}".format(line)
+
+        return ret
+
+    def add_value(self, value):
+        """ Add value to entry.
+
+        Add a new PreprocessorValue entry to the current PreprocessorEntry
+        object's data array.
+
+        Args:
+            value: value to be added to entry data array
+
+        """
+        PreprocessorValue(self, value=value)
+
+    def add_text(self, text):
+        """ Add text to entry.
+
+        Perform text processing (e.g. remove leading and trailing spaces
+        on string.  Then add a new PreprocessorValue entry to the current
+        PreprocessorEntry object's data array with the value of the
+        processed text.
+
+        Args:
+            text: The text string to be added to the tree
+
+        """
+
+        # Don't add when text is None
+        if (text is None):
+            return
+
+        # TODO may need to make this more intelligent
+        # Remove all leading and trailing whitespace characters
+        text = text.strip()
+
+        # Only add text entry when text is not empty string
+        if (text != ""):
+            self.add_value(text)
+
+    def get_values(self, tag=None, join=False):
+        """ Return value(s) of entry
+
+        Get all values (PreprocessorValue object data) in the current
+        entry's data array. When a tag is specified, all value entries
+        associated with the tag are returned, as an array. When the
+        join argument is True, all the values associated with
+        a specific entry are joined together. Therefore, when
+        tag is unspecified and join is True, all the values of the current
+        entry are joined and returned as a single value. When join
+        is False, an array of values is returned. When tag is specified and
+        join is True, an array of the joined values for each entry
+        associated with the tag are returned. When the tag is specified
+        and join is False, an array of the arrays of values for each entry
+        associated with the tag are returned.
+
+        Kwargs:
+            tag: name of tag to retreive values from
+            join: indicates whether to join values
+
+        Return:
+            if tag=None and join=True:  single string of joined values
+            if tag=None and join=False: array of values
+            if tag specified and join=True:  array of joined values
+            if tag specified and join=False: array of arrays of values
+
+        """
+
+        # Get values from entries matching tag in data array
+        if tag:
+            return [pp.get_values(join=join) for pp in self.data
+                    if pp.which == "entry" and pp.tag == tag]
+
+        # Get values in data array
+        values = [pp.value for pp in self.data if pp.which == "value"]
+
+        if join:
+            return ''.join(values)
+        else:
+            return values
+
+    def delete(self):
+        """ Delete entry from parent's data array.
+
+        Effectively deletes the element from the whole entry tree by removing
+        the reference from the parent's data array.
+        """
+
+        self.parent.data.remove(self)
+
+    def remove(self, tag=None):
+        """ Remove entry with tag from the current element's data array
+
+        Deletes all entries with the specified tag from the whole entry tree
+        by removing the reference from this entry's data array.
+
+        Args:
+            tag: name of entry to remove
+
+        """
+
+        if tag is None:
+            return
+
+        for child in self.data:
+            if (child.which == "entry" and child.tag == tag):
+                self.data.remove(child)
+
+    def to_value(self, val):
+        """ Convert the current entry to a value.
+
+        Delete the current PreprocessorEntry from the parent's data array
+        and replace it with a ProprocessorValue with the value specified
+        by val.
+        """
+
+        # Get current index and replace it with new PreprocessorValue object
+        idx = self.parent.data.index(self)
+        pp_val = PreprocessorValue(value=val)
+        self.parent.data[idx] = pp_val
+
+        # Update parent pointer in new pp_val object
+        pp_val.parent = self.parent
+
+    def error_info(self):
+        return "in element \"{}\", line {}"\
+                "".format(self.parent.tag, self.elem._start_line_number)
+
+class PreprocessorValue:
+    """ This is the preprocess value class.
+
+    The preprocess value object is used by the PresentationPreprocessor
+    class to hold values of elements and data for an entry.
+
+    A value object has a value attribute, which holds the text value of
+    elements and attributes from the XML file.
+
+    """
+    # Used to differentiate PreprocessorEntry and PreprocessorValue objects
+    which = "value"
+
+    def __init__(self, parent=None, value=None):
+        """ Initialize new PreprocessorValue object.
+
+        Create object with parent and value. The value is stored in the
+        value variable for the object. The parent specifies the parent
+        PreprocessorEntry where the new new PreprocessorValue should be
+        added. This function will append the new PreprocessorValue to the
+        end of the parent's data array.
+        When value is set, a new PreprocessorValue object is created with
+
+        Kwargs:
+            parent: The parent entry that is to hold the newly created value.
+                The new value will be appended to the end of the data array
+                of the parent entry.
+            value: The value of the PreprocessorValue object.
+
+        """
+
+        if value:
+            self.value = value
+
+        # Add entry to end of data array for parent
+        if parent:
+            self.parent = parent
+            parent.data.append(self)
+
+    def __repr__(self):
+        return "<{} '{}' at {}>"\
+                "".format( self.__class__.__name__, self.value, hex(id(self)))
+
+    def __str__(self):
+        ret  = "<{}: \"{}\">".format(self.which, self.value)
+        return ret
 
 
+# From Duncan Harris on stack overflow: https://stackoverflow.com/questions/
+#   6949395/is-there-a-way-to-get-a-line-number-from-an-elementtree-element
+class LineNumberingParser(ET.XMLParser):
+    # Python3
+    def _start(self, *args, **kwargs):
+        # Here we assume the default XML parser
+        element = super(self.__class__, self)._start(*args, **kwargs)
+        self._start_helper(element)
+        return element
+
+    # Python2
+    def _start_list(self, *args, **kwargs):
+        # Here we assume the default XML parser
+        element = super(self.__class__, self)._start_list(*args, **kwargs)
+        self._start_helper(element)
+        return element
+
+    # Function for both python3 and python2
+    def _start_helper(self, element):
+        # Copy element position attributes into output Elements
+        element._start_line_number = self.parser.CurrentLineNumber
+        element._start_column_number = self.parser.CurrentColumnNumber
+        element._start_byte_index = self.parser.CurrentByteIndex
 
 
+    def _end(self, *args, **kwargs):
+        element = super(self.__class__, self)._end(*args, **kwargs)
+        element._end_line_number = self.parser.CurrentLineNumber
+        element._end_column_number = self.parser.CurrentColumnNumber
+        element._end_byte_index = self.parser.CurrentByteIndex
+        return element
 
+# Run program
+main()

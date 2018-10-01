@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <presentation>
   <set var="path">./test/</set>
-  <set var="img_path"  prepend="path">images</set>
+  <set var="img_path"  prepend="path">images/</set>
   <set var="xlsx_path" prepend="path">example.xlsx</set>
   <set var="data_path"><get var="path"/>data.csv</set>
 
