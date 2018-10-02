@@ -2,8 +2,8 @@
 <presentation>
   <set var="path">./test/</set>
   <set var="img_path"  prepend="path">images/</set>
-  <set var="xlsx_path" prepend="path">example.xlsx</set>
-  <set var="data_path"><get var="path"/>data.csv</set>
+  <set var="xlsx_path" prepend="path">instrument_frequencies.xlsx</set>
+  <set var="data_path"><get var="path"/>instrument_types.csv</set>
 
   <!-- ################################### -->
   <!-- Title                               -->
@@ -27,10 +27,7 @@
 
   <slide label="section" layout="1content">
     <content type="table">
-      <row>
-        <cell>hi</cell>
-        <cell>bye</cell>
-      </row>
+      <import prepend="xlsx_path" row="1" col="a-b"/>
       <row>
         <cell/>
         <cell>What's up?</cell>

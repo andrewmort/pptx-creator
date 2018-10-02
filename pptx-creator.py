@@ -6,6 +6,7 @@
 #
 # Dependencies:
 #   - python-pptx: Install with "pip install --user python-pptx"
+#   - openpyxl: Install with "pip install --user openpyxl"
 #   - pathlib2: (python2 only) Install with "pip install --user pathlib2"
 #
 # Versions History:
@@ -37,6 +38,7 @@ sys.modules['_elementtree'] = None
 
 from pptx import Presentation
 import xml.etree.ElementTree as ET
+import openpyxl
 import datetime
 import os
 import re
@@ -591,6 +593,8 @@ class PresentationCreator:
                 if (cur_col > max_col):
                     max_col = cur_col
 
+            elif (row.tag == "import"):
+
             else:
                 raise ValueError("invalid element \"{}\" in table, "\
                         "expected row element.\n{}"\
@@ -610,6 +614,69 @@ class PresentationCreator:
                 if (j >= len(table[i])):
                     break
                 self._prs_insert_text(table[i][j], prs_table.cell(i,j))
+
+    def _import(self, entry, return_format="string"):
+        """ Import data from file into presentation
+
+        Read the file based on the extension (.csv, .xlsx) and return the
+        data that is read. The name of the file is specified as the value
+        of the import element.
+
+        For each file category, attributes can be used to specify which
+        data should be imported:
+
+            Spreadsheet(.csv/.xlsx)
+                row: may be a single value, range, or list to indicate which
+                    rows should be imported
+                col: may be a single value, range, or list to indicate which
+                    columns should be imported
+
+                Returns:
+                    - string = string representing 2-dim array
+                    - 1-dim  = 1 dimensional array containing string
+                        representations of each row of values
+                    - 2-dim  = 2 dimensional array of row, column values
+
+        Args:
+            entry: PreprocessorEntry with text data
+
+        Kwargs:
+            return_format: format of data returned
+                - string = one string of data
+                - 1-dim  = 1 dimensional array of data
+                - 2-dim  = 2 dimensional array of data
+
+        Return:
+            data that was imported in format specified by return_format
+
+        """
+
+        # Get filename from entry
+        path_file = pathlib.Path(entry.get_values(join=True))
+
+        if (path_file.suffix == ".xlsx"):
+        elif (path_file.suffix == ".csv"):
+        else:
+            raise ValueError("invalid import suffix \"{}\"\n{}"\
+                    "".format(path_file.suffix, self.ppp.error_info(entry)))
+
+
+class ImportXLSX:
+    def __init__(self, filename, sheet=None):
+
+        self.filename = filename
+
+        # Load workbook
+        self.wb = openpyxl.load_workbook(self.filename, read_only=True)
+
+        # Get sheet
+        if sheet is None:
+            self.sheet = wb.active
+        else:
+            self.sheet = wb[sheet]
+
+
+
 
 
 # Use lines from input file to create presentation
