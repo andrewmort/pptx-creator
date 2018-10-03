@@ -25,19 +25,18 @@
     </placeholder>
   </slide>
 
-  <slide label="section" layout="1content">
-    <content type="table">
-      <import prepend="xlsx_path" row="1" col="a-b"/>
+  <slide label="section" layout="2content">
+    <content0 type="table">
+      <import prepend="xlsx_path" row="1" col="a-c" sheet="freqs"/>
       <row>
         <cell/>
-        <cell>What's up?</cell>
-        <cell>More text</cell>
+        <import prepend="xlsx_path" row="6,7,8" col="2,3" sheet="freqs"/>
       </row>
-      <row/>
       <row>
-        <cell>a</cell>
+        <cell>Row 7 </cell>
+        <cell>test </cell>
       </row>
-    </content>
+    </content0>
   </slide>
 
   <slide label="example1" layout="1content">

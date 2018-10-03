@@ -30,6 +30,7 @@
 #   - add bulleted list placeholder type
 #
 
+import openpyxl # Import data from xlsx files
 
 # Force python XML parser not faster C accelerators
 # because we can't hook the C implementation
@@ -38,11 +39,12 @@ sys.modules['_elementtree'] = None
 
 from pptx import Presentation
 import xml.etree.ElementTree as ET
-import openpyxl
 import datetime
 import os
 import re
 import argparse
+
+import csv      # Import data from csv files
 
 try:
     import pathlib
@@ -458,7 +460,7 @@ class PresentationCreator:
 
         for sub in entry.data:
             if (sub.which == "value"):
-                text += sub.value
+                text += str(sub.value)
                 continue
 
             if (sub.tag == "date"):
@@ -556,7 +558,7 @@ class PresentationCreator:
 
         """
 
-        table = {}
+        table = []
         max_col = 0
         cur_row = -1
 
@@ -571,7 +573,8 @@ class PresentationCreator:
                 # Initialize new row in array
                 cur_row += 1
                 cur_col = -1
-                table[cur_row] = {}
+                if len(table) <= cur_row:
+                    table.insert(cur_row, [])
 
                 # Iterate through columns
                 for col in row.data:
@@ -582,18 +585,64 @@ class PresentationCreator:
 
                     # Add cell entry to table array
                     if (col.tag == "cell"):
+                        while(True):
+                            cur_col += 1
+
+                            # Add data if at end of row
+                            if len(table[cur_row]) <= cur_col:
+                                table[cur_row].append(col)
+                                break
+
+                            # Add data if current cell is empty
+                            elif table[cur_row][cur_col] is None:
+                                table[cur_row][cur_col] = col
+                                break
+
+                        # TODO - delete me
+                        #print ("row={}\n  {}".format(cur_row, str(table[cur_row])))
+
+                    # Add import entries to table array
+                    elif (col.tag == "import"):
                         cur_col += 1
-                        table[cur_row][cur_col] = col
+
+                        # Add entries to table without changing cur_row
+                        for i,irow in enumerate(self._import(col)):
+                            if len(table) <= cur_row + i:
+                                table.insert(cur_row + i, [])
+
+                            # Add preceding cells when cur_col != 0
+                            row_len = len(table[cur_row + i])
+                            if (row_len < cur_col):
+                                for j in range(row_len,cur_col):
+                                    table[cur_row + i].insert(j, None)
+
+                            # Insert entries into table
+                            for j,icol in enumerate(irow):
+                                table[cur_row + i].insert(cur_col + j, icol)
+                            # TODO - delete me
+                            #print ("row={}\n  {}".format(cur_row + i, str(table[cur_row + i])))
+
+                    # Invalid element
                     else:
                         raise ValueError("invalid element \"{}\" in table "\
                                 "row, expected cell element.\n{}"\
                                 "".format(col.tag, self.ppp.error_info(col)))
 
                 # Update max_col count
-                if (cur_col > max_col):
-                    max_col = cur_col
+                if (len(table[cur_row]) > max_col+1):
+                    max_col = len(table[cur_row]) - 1
 
+            # Add import entries to table array
             elif (row.tag == "import"):
+
+                # Add entries to table and change cur_row
+                for irow in self._import(row):
+                    cur_row += 1
+                    if len(table) <= cur_row:
+                        table.insert(cur_row, [])
+
+                    for icol in irow:
+                        table[cur_row].append(icol)
 
             else:
                 raise ValueError("invalid element \"{}\" in table, "\
@@ -601,7 +650,7 @@ class PresentationCreator:
                         "".format(row.tag, self.ppp.error_info(row)))
 
         # Create table on slide at location of placeholder
-        prs_table = prs_slide.shapes.add_table(cur_row+1, max_col+1,
+        prs_table = prs_slide.shapes.add_table(len(table), max_col+1,
                 prs_ph.left, prs_ph.top, prs_ph.width, prs_ph.height).table
 
         # remove placeholder from slide
@@ -609,18 +658,28 @@ class PresentationCreator:
         elem.getparent().remove(elem)
 
         # place text into table
-        for i in range(0,cur_row+1):
+        for i in range(0,len(table)):
             for j in range(0,max_col+1):
+                # Some rows may not contain all columns
                 if (j >= len(table[i])):
                     break
+
+                # Some cells may be empty
+                elif (table[i][j] is None):
+                    continue
+
+                #TODO - delete me
+                #print("row:{},col:{},data:{}".format(i, j, table[i][j]))
+
+                # Add text from element to cell
                 self._prs_insert_text(table[i][j], prs_table.cell(i,j))
 
-    def _import(self, entry, return_format="string"):
-        """ Import data from file into presentation
+    def _import(self, entry):
+        """ Import data from file for presentation
 
-        Read the file based on the extension (.csv, .xlsx) and return the
-        data that is read. The name of the file is specified as the value
-        of the import element.
+        Read the file based on the extension (.csv, .xlsx) and return an
+        array of entries containing the data that is read. The name of the
+        file is specified as the value of the import element.
 
         For each file category, attributes can be used to specify which
         data should be imported:
@@ -631,340 +690,359 @@ class PresentationCreator:
                 col: may be a single value, range, or list to indicate which
                     columns should be imported
 
-                Returns:
-                    - string = string representing 2-dim array
-                    - 1-dim  = 1 dimensional array containing string
-                        representations of each row of values
-                    - 2-dim  = 2 dimensional array of row, column values
-
         Args:
             entry: PreprocessorEntry with text data
 
-        Kwargs:
-            return_format: format of data returned
-                - string = one string of data
-                - 1-dim  = 1 dimensional array of data
-                - 2-dim  = 2 dimensional array of data
-
         Return:
-            data that was imported in format specified by return_format
+            2 dimensional array of entries containing the imported data
 
         """
+
+        cat = None
 
         # Get filename from entry
         path_file = pathlib.Path(entry.get_values(join=True))
 
+        # Determine type of file and open appropriate importer
         if (path_file.suffix == ".xlsx"):
+            cat = "spreadsheet"
+
+            importer = ImportXLSX(str(path_file), entry=entry)
+
         elif (path_file.suffix == ".csv"):
+            cat = "spreadsheet"
+
+            importer = ImportCSV(str(path_file), entry=entry)
+
         else:
             raise ValueError("invalid import suffix \"{}\"\n{}"\
                     "".format(path_file.suffix, self.ppp.error_info(entry)))
 
+        # Spreadsheet file
+        if (cat == "spreadsheet"):
+            for child in entry.data:
+                # Ignore value entries (we already have filename
+                if (child.which == "value"):
+                    continue
 
-class ImportXLSX:
-    def __init__(self, filename, sheet=None):
+                # Get row spec
+                elif (child.tag == "row"):
+                    importer.add_row(child.get_values(join=True))
 
-        self.filename = filename
+                # Get col spec
+                elif (child.tag == "col"):
+                    importer.add_col(child.get_values(join=True))
+
+                # Get sheet
+                elif (child.tag == "sheet"):
+                    importer.add_sheet(child.get_values(join=True))
+
+                # Invalid child element
+                else:
+                    raise ValueError("invalid import attribute \"{}\"\n{}"\
+                            "".format(child.tag, self.ppp.error_info(child)))
+
+
+            # Get data from importer
+            entries = importer.read()
+
+        # Invalid category
+        else:
+            raise AssertionError("invalid import category \"{}\""\
+                    "".format(cat))
+
+        return entries
+
+class ImportSpreadsheet(object):
+    """ Inherited by classes uses to read specific Spreadsheet file formats
+
+    Contains the base functions shared by all types of spreadsheets
+
+    """
+
+    def __init__(self, filename, filetype, entry=None):
+        self.filename=filename
+        self.filetype=filetype
+        self.entry = entry
+        self.rows = []
+        self.cols = []
+
+    def add_row(self, row):
+        """ Set the row or rows to be read from the spreadsheet
+
+        A string representing the row(s) to be read from the spreadsheet
+        is passed to this function and stored in this object until the data
+        is to be read from the file. This function can be called multiple
+        times to add to the number of rows that should be read. The data from
+        the rows will be returned in the order they are specified and the data
+        from a row can be read multiple times.
+
+        Rows in a file start at 1 and count up.
+
+        Row specification examples:
+            "1"     = read row 1 from the file
+            "1:6"   = read rows 1 through 6 from the file
+            "2,4,2" = read rows 2, 4, and 2 from the file
+            "2,4-6" = read rows 2, 4, 5, 6 from the file
+
+        Args:
+            row: string specifying the rows to be read
+
+        """
+
+        # Add values from row spec to row array
+        self.rows += self._get_array(row)
+
+
+    def add_col(self, col):
+        """ Set the column or columns to be read from the spreadsheet
+
+        A string representing the column(s) to be read from the spreadsheet
+        is passed to this function and stored in this object until the data
+        is to be read from the file. This function can be called multiple
+        times to add to the number of columns that should be read. The data
+        from the columns will be retrieved in the order they are specified 
+        and the data from a column can be read multiple times.
+
+        Columns in a file start at 1 (or A) and count up.
+
+        Column specification examples:
+            "a"     = read the first column from the file
+            "a:6"   = read columns 1 through 6 from the file
+            "2,d,7" = read columns 2, 4, and 7 from the file
+            "2,4-6" = read columns 2, 4, 5, 6 from the file
+
+        Args:
+            col: string specifying the rows to be read
+
+        """
+
+        # Add values from column spec to column array
+        self.cols += self._get_array(col)
+
+    def _get_array(self, spec):
+        """ Return array of values specified by the row or column spec
+
+        The spec string contains information about which columns or rows
+        should be read from a file. This function converts that spec into
+        an array of values that can be used to read the data.
+
+        Example specifications:
+            "a"     = returns [1]
+            "a:6"   = returns [1,2,3,4,5,6]
+            "2,d,7" = returns [2,4,7]
+            "2,4-6" = returns [2,4,5,6]
+            "2:12:4" = returns [2,6,10]
+
+        Args:
+            spec: string specifying row/column ranges
+
+        Return:
+            array derivied from spec row/column ranges
+
+        """
+
+        array = []
+
+        # Define re to split range specs
+        re_range   = re.compile('\s*[-:]\s*')
+        re_digits  = re.compile('[0-9]')
+        re_letters = re.compile('[a-z]')
+
+        # Split spec at commas (don't split range specs)
+        list_vals = re.split('(?<![-:])\s*,?\s*(?![-:])', spec)
+
+        # Loop through split spec values
+        for list_val in list_vals:
+
+            # Split all values into range specs if possible
+            range_vals = re_range.split(list_val)
+
+            # Convert all values from letters to numbers
+            for i,range_val in enumerate(range_vals):
+                tmp = range_val.lower()
+
+                # All letters, convert to int
+                if re_letters.match(tmp):
+                    # Don't combine letters and digits in single value
+                    if re_digits.match(tmp):
+                        raise ValueError('cannot mix digits and letters "{}" '\
+                            'in row/column spec "{}"'.format(range_val, spec))
+
+                    num = 0
+                    for j,char in enumerate(tmp):
+                        tmp = 26**(len(tmp) - j - 1)
+                        tmp *= ord(char) - ord('a') + 1
+                        num += tmp
+
+                    tmp = num
+
+                # All digits, interpret at int
+                else:
+                    tmp = int(range_val)
+
+                # Store result into range_vals
+                range_vals[i] = tmp
+
+            # Range spec, create range
+            if (len(range_vals) == 2 or len(range_vals) == 3):
+                # Set increment range array
+                if len(range_vals) == 3:
+                    inc = abs(range_vals[2])
+                else:
+                    inc = 1
+
+                # Array couting from range_vals[0] to range_vals[1]
+                if (range_vals[0] <= range_vals[1]):
+                    array += range(range_vals[0], range_vals[1]+1, inc)
+
+                # Array couting down from range_vals[0] to range_vals[1]
+                else:
+                    array += range(range_vals[0], range_vals[1]-1,-inc)
+
+            # Individual value
+            elif len(range_vals) == 1:
+                array += range_vals
+
+            # Something is wrong
+            else:
+                raise ValueError('invalid number of range arguments "{}" '\
+                    'in row/column spec "{}"'.format(list_val, spec))
+
+        return array
+
+
+class ImportXLSX (ImportSpreadsheet):
+    def __init__(self, filename, sheet=None, entry=None):
+        # Call init of inherited class
+        super(self.__class__, self).__init__(filename, "xlsx", entry=entry)
 
         # Load workbook
-        self.wb = openpyxl.load_workbook(self.filename, read_only=True)
+        self.xl_wb = openpyxl.load_workbook(self.filename)
 
-        # Get sheet
-        if sheet is None:
-            self.sheet = wb.active
+        # Set sheet name
+        self.add_sheet(sheet)
+
+    def add_sheet(self, sheet):
+        """ Set sheet name for workbook
+
+        Used to save the name of the sheet used in the workbook. This
+        will be used when the workbook is read.
+
+        Args:
+            sheet: name of the sheet from the workbook
+                (if None, the active sheet is used)
+        """
+
+        self.sheet = sheet
+
+    def read(self):
+        """ Get the data from xlsx file
+
+        Read the data specified by the row and column array of
+        the object and return the data in a 2-dimensional array.
+
+        Return:
+            2-dimensional array of entries containing data from spreadsheet
+
+        """
+
+        # Get workbook sheet
+        if self.sheet is None:
+            xl_sheet = self.xl_wb.active
         else:
-            self.sheet = wb[sheet]
+            xl_sheet = self.xl_wb[self.sheet]
 
+        # Look at all rows/columns when range not specified
+        if len(self.rows) == 0:
+            self.rows = range(1, xl_sheet.max_row + 1)
 
+        if len(self.cols) == 0:
+            self.cols = range(1, xl_sheet.max_column + 1)
 
+        # Populate array with data from spreadsheet
+        array = []
+        for row_idx, row_num in enumerate(self.rows):
+            array.insert(row_idx, [])
+            for col_num in self.cols:
+                cell = xl_sheet.cell(row=row_num, column=col_num)
 
+                # Create PreprocessorEntry for data and add to array
+                # TODO should this point to parent's element?
+                array[row_idx].append(PreprocessorEntry(self.entry.tag,
+                        parent=self.entry, elem=self.entry.elem,
+                        value=cell.value))
 
-# Use lines from input file to create presentation
-def oldnew_make_presentation(prs, xml_tree):
-    prs_slides = []
-    prs_slides_ref = {}
-    slides_layout = []
-    defines = {}
+                # TODO
+                #print("cell({},{})={}".format(row_num,col_num,cell.value))
 
-    slide_idx = 0
+        return array
 
-    # Create slides first so we can create links while adding content
-    for xml_slide in xml_tree.iter('slide'):
-        # Get layout type
-        layout = xml_slide.get('layout')
-        if layout == "title":
-            slides_layout[slide_idx] = PPTX_LAYOUT_TITLE
-        elif layout == "section":
-            slides_layout[slide_idx] = PPTX_LAYOUT_SECTION
-        elif layout == "1content":
-            slides_layout[slide_idx] = PPTX_LAYOUT_1CONTENT
-        elif layout == "2content":
-            slides_layout[slide_idx] = PPTX_LAYOUT_2CONTENT
-        else:
-            print("Error: Slide {} does not specify a valid layout "
-                    "attribute \"{}\"".format(slide_idx+1,layout))
-            raise
+class ImportCSV(ImportSpreadsheet):
+    """ This class extends ImportSpreadsheet to support csv files
 
-        # Create the new slide
-        prs_layout = prs.slide_layouts[slides_layout[slide_idx]]
-        prs_slides[slide_idx] = prs.slides.add_slide(prs_layout)
+    This class contains methods for reading the specified rows and columns
+    of a csv file and returning the values.
 
-        # If slide has a label, add it to the references
-        label = xml_slide.get('label')
-        if (label):
-            # Do not allow duplicate references
-            if (label in slides_ref):
-                print("Error: Label {} on slide {} (layout {}) already "
-                        "exists".format(label,slide_idx+1,layout))
-                raise
+    """
+    def __init__(self, filename, entry=None):
+        # Call init of inherited class
+        super(self.__class__, self).__init__(filename, "csv", entry=entry)
 
-            prs_slides_ref[label] = slides[slide_idx]
+    def read(self):
+        """ Get the data from csv file
 
-        slide_idx += 1
+        Read the data specified by the row and column array of
+        the object and return the data in a 2-dimensional array.
 
-    # Reset variable for loop
-    slide_idx = 0
+        Return:
+            2-dimensional array of entries containing data from spreadsheet
 
-    # Loop through all xml elements in order
-    for xml_child in xml_tree:
-        1+1
-        # Slide definitions
-        #if (xml_child.tag == 'slide'):
+        """
 
+        file_array = []
+        max_col = 0
 
-        # Variable definitions
-        #elif (xml_child.tag == 'define'):
+        # Read entire file into memory
+        with open(filename, newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            for i,row in enumerate(reader):
+                # Add row to file array
+                file_array[i] = row
 
-        # Invalid elements
-        #else:
-            #print("Error: Invalid element \"" + xml_child.tag + "\"")
-            #raise
+                # Update max column number
+                if (len(row) > max_col):
+                    max_col = len(row)
 
+        # Look at all rows/columns when range not specified
+        if len(self.rows) == 0:
+            self.rows = range(1, len(file_array)+1)
 
-def old_make_presentation(prs, lines):
-    slide_type = ''
-    invalid_images = []
-    image_path = ''
+        if len(self.cols) == 0:
+            self.cols = range(1, max_col + 1)
 
-    for i in range(0, len(lines)):
-        line = lines[i]
-        line_idx = i + 1
+        # Populate array with data from spreadsheet
+        array = []
+        for row_idx, row_num in enumerate(self.rows):
+            array.insert(row_idx, {})
+            for col_idx, col_num in enumerate(self.cols):
 
-        # Remove comments and end of lines
-        line = re.sub(r'\s*#.*', '', line)
-        line = re.sub(r'\n', '', line)
+                # If cell is outside range of file, set contents to ""
+                if (row_num > len(file_array) or col_num > max_col):
+                    val = ""
 
-        # Split the line into fields seperated by commas
-        fields = re.split(r'\s*,\s*', line)
-
-        # Ignore when there are no fields
-        if len(fields) < 1 or fields[0] == '':
-            continue
-
-        if verbose:
-            print("line {}".format(line_idx))
-            print(fields)
-
-        # Create new slide
-        if fields[0].strip() == 'slide':
-            if image_path == '':
-                print("Warning: image_path is not set using \".\"")
-                image_path = "."
-
-            if len(fields) < 2:
-                print("Error: 'slide' line must contain more than 1 field."
-                        "(line {})\n".format(line_idx))
-                raise
-
-            # Set layout for new slide
-            if fields[1].strip() == "layout":
-                if len(fields) < 3:
-                    print("Error: 'slide, layout' line must contain more "
-                            "than 2 fields. (line {})\n".format(line_idx))
-                    raise
-
-                # Get slide layout
-                if fields[2].strip() == "title":
-                    slide_layout = prs.slide_layouts[PPTX_LAYOUT_TITLE]
-                elif fields[2].strip() == "section":
-                    slide_layout = prs.slide_layouts[PPTX_LAYOUT_SECTION]
-                elif fields[2].strip() == "1content":
-                    slide_layout = prs.slide_layouts[PPTX_LAYOUT_1CONTENT]
-                elif fields[2].strip() == "2content":
-                    slide_layout = prs.slide_layouts[PPTX_LAYOUT_2CONTENT]
+                # Get data from file
                 else:
-                    print("Error: Invalid field 2 \"" + fields[2] +
-                            "\" (line {})\n".format(line_idx))
-                    raise
+                    val = file_array[row_num -1][col_num - 1]
 
-                # Save slide type and add new slide
-                slide_type = fields[2].strip()
-                slide = prs.slides.add_slide(slide_layout)
+                # Create PreprocessorEntry for data and add to array
+                # TODO should this point to parent's element?
+                array[row_idx].append(PreprocessorEntry(self.entry.tag,
+                        parent=self.entry, elem=self.entry.elem,
+                        value=val))
 
-            else:
-                print("Error: Invalid field 1 \"" + fields[1] + 
-                        "\" (line {})\n".format(line_idx))
-                raise
+        return array
 
-        elif re.match("\s*image_path.*", line):
-            fields = re.split("\s*=\s*", line)
-            if len(fields) < 2:
-                print("Error: image_path assignment must contain more than 1 "
-                        "field (line {})".format(line_idx))
-                raise
-
-            if slide_type != '':
-                print ("Error: image_path assignment must come before "
-                        "any slides are added! (line {})".format(Line_idx))
-                raise
-
-            # Remove any quotes
-            image_path = re.sub(r'\"', '', fields[1])
-
-            # Find all image files under image path
-            images = list(pathlib.Path(image_path).glob('**/*.png'))
-
-        # Current slide operation
-        elif slide_type != '':
-            invalid = 0
-
-            # Determine field 0 for a placeholder line
-            if slide_type == "title":
-                if fields[0].strip() == "title":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_TITLE_TITLE]
-                elif fields[0].strip() == "subtitle":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_TITLE_SUBTITLE]
-                else:
-                    invalid = 1
-            elif slide_type == "section":
-                if fields[0].strip() == "title":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_SECTION_TITLE]
-                elif fields[0].strip() == "subtitle":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_SECTION_SUBTITLE]
-                else:
-                    invalid = 1
-            elif slide_type == "1content":
-                if fields[0].strip() == "title":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_1CONTENT_TITLE]
-                elif fields[0].strip() == "content0":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_1CONTENT_CONTENT0]
-                else:
-                    invalid = 1
-            elif slide_type == "2content":
-                if fields[0].strip() == "title":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_2CONTENT_TITLE]
-                elif fields[0].strip() == "content0":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_2CONTENT_CONTENT0]
-                elif fields[0].strip() == "content1":
-                    placeholder \
-                        = slide.placeholders[PPTX_PLACEHOLDER_2CONTENT_CONTENT1]
-                else:
-                    invalid = 1
-            else:
-                invalid = 1
-
-            if invalid == 1:
-                print("Error: Invalid field 0 \"" + fields[0]
-                        + "\" for slide layout \"" + slide_type
-                        + "\" (line {})\n".format(line_idx))
-                raise
-
-            if len(fields) < 2:
-                print("Error: content line of slide layout \"" + slide_type
-                        + "\" must contain more than 1 field. "
-                        + "(line {})\n".format(line_idx))
-                raise
-
-            # Determine field 1 for a placeholder line
-            if fields[1].strip() == "string":
-                if len(fields) < 3:
-                    print("Error: content line of slide layout \"" + slide_type
-                            + "\" must contain more than 1 field. "
-                            + "(line {})\n".format(line_idx))
-                    raise
-
-                string = re.sub(r'\"', '', fields[2])
-                placeholder.text = string
-
-            elif fields[1].strip() == "image":
-                if len(fields) < 3:
-                    print("Error: content line of slide layout \"" + slide_type
-                            + "\" must contain more than 1 field. "
-                            + "(line {})\n".format(line_idx))
-                    raise
-
-                string = re.sub(r'\"', '', fields[2])
-                string = image_path + "/" + string
-                if pathlib.Path(string).exists():
-                    if pathlib.Path(string) in images:
-                        images.remove(pathlib.Path(string))
-                    insert_image(string, placeholder, slide)
-                else:
-                    invalid_images.append(string)
-                    placeholder.text = "Image Not Found: " + string
-
-            elif fields[1].strip() == "date":
-                placeholder.text = datetime.datetime.now().strftime("%B %d, %Y")
-
-            else:
-                invalid = 1
-
-            if invalid == 1:
-                print("Error: Invalid field 1 \"" + fields[0]
-                        + "\" for slide layout \"" + slide_type
-                        + "\" (line {})\n".format(line_idx))
-                raise
-
-        # Invalid operation
-        else:
-            print("Error: Invalid field 0 \"" + fields[0] + 
-                    "\" (line {})\n".format(line_idx))
-            raise
-
-    # Print invalid image paths
-    if len(invalid_images) > 0:
-        print("Invalid Image Paths: ")
-        for path in invalid_images:
-            print("  " + path)
-
-    # Print unused image paths
-    if len(images) > 0:
-        print("Unused Image Paths: ")
-        for path in images:
-            print("  " + str(path))
-
-# Function: insert_image()
-# Description: Insert image into slide at position of placeholder
-# while preserving the aspect ratio of the image. This function
-# replaces the placeholder with the image, deleting the placeholer.
-#
-# Based on replace_with_image() by sclem
-#   from https://github.com/scanny/python-pptx/issues/176
-#
-def insert_image(image, placeholder, slide):
-    pic = slide.shapes.add_picture(image, placeholder.left, placeholder.top)
-
-    # calculate max width/height for target size
-    ratio = min(placeholder.width  / float(pic.width), placeholder.height / float(pic.height))
-
-    pic.height = int(pic.height * ratio)
-    pic.width  = int(pic.width  * ratio)
-
-    pic.left = placeholder.left + ((placeholder.width  - pic.width)/2)
-    pic.top  = placeholder.top  + ((placeholder.height - pic.height)/2)
-
-    elem = placeholder.element
-    elem.getparent().remove(elem)
-
-    return pic
 
 class PresentationPreprocessor:
     """ Preprocess data for creating pptx presentation.
@@ -1439,7 +1517,7 @@ class PreprocessorEntry:
         self.is_attrib = is_attrib
 
         # When value is specified create PreprocessorValue in data array
-        if value:
+        if not value is None:
             self.add_value(value)
 
         # Add entry to end of data array for parent
@@ -1475,7 +1553,7 @@ class PreprocessorEntry:
             value: value to be added to entry data array
 
         """
-        PreprocessorValue(self, value=value)
+        PreprocessorValue(parent=self, value=value)
 
     def add_text(self, text):
         """ Add text to entry.
