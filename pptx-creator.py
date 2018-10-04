@@ -619,6 +619,7 @@ class PresentationCreator:
                             # Insert entries into table
                             for j,icol in enumerate(irow):
                                 table[cur_row + i].insert(cur_col + j, icol)
+
                             # TODO - delete me
                             #print ("row={}\n  {}".format(cur_row + i, str(table[cur_row + i])))
 
@@ -764,8 +765,11 @@ class ImportSpreadsheet(object):
         self.filename=filename
         self.filetype=filetype
         self.entry = entry
+        self.data = None
         self.rows = []
         self.cols = []
+        self.row_keys = []
+        self.col_keys = []
 
     def add_row(self, row):
         """ Set the row or rows to be read from the spreadsheet
@@ -775,7 +779,8 @@ class ImportSpreadsheet(object):
         is to be read from the file. This function can be called multiple
         times to add to the number of rows that should be read. The data from
         the rows will be returned in the order they are specified and the data
-        from a row can be read multiple times.
+        from a row can be read multiple times. If no columns are specified,
+        all the columns in the spreadsheet will be returned.
 
         Rows in a file start at 1 and count up.
 
@@ -793,7 +798,6 @@ class ImportSpreadsheet(object):
         # Add values from row spec to row array
         self.rows += self._get_array(row)
 
-
     def add_col(self, col):
         """ Set the column or columns to be read from the spreadsheet
 
@@ -802,7 +806,9 @@ class ImportSpreadsheet(object):
         is to be read from the file. This function can be called multiple
         times to add to the number of columns that should be read. The data
         from the columns will be retrieved in the order they are specified 
-        and the data from a column can be read multiple times.
+        and the data from a column can be read multiple times. If no
+        columns are specified, all the columns in the spreadsheet will
+        be returned.
 
         Columns in a file start at 1 (or A) and count up.
 
@@ -819,6 +825,50 @@ class ImportSpreadsheet(object):
 
         # Add values from column spec to column array
         self.cols += self._get_array(col)
+
+    def add_row_key(self, row_key, col=None, re=False):
+        """ Set the key used to match rows in the spreadsheet
+
+        This adds a key to the list of keys used to filter the rows that
+        are returned from the spreadsheet. If the rows and columns are set,
+        the filter spec will operate on the data contained in those rows
+        and columns and will ignore any data outside those ranges. However,
+        it is possible to match on data that will not be returned by
+        providing a column spec (the same format as add_col() function), which
+        will limit the key search to the specified columns, even if that
+        column is not included in the set of columns to be returned.
+
+        Args:
+            row_key: a string used to match row data
+
+        Kwargs:
+            col: string specifying which columns to use when finding
+                a match to the row_key
+            re: indicates whether regular expression foramtting is used
+                for the row_key string
+
+        """
+
+        self.row_keys.append({})
+        self.row_keys[-1]["key"] = row_key
+        self.row_keys[-1]["col"] = self._get_array(col)
+        self.row_keys[-1]["re"]  = re
+
+    def get_data(self):
+        """ Get data specified by column and row specifications
+
+        Return data as a 2-dimensional array of PreprocessorEntries as
+        filtered by the column and row specifications.
+
+        Return:
+            2-dimensional array of data as PreprocessorEntries
+
+        """
+
+        if self.data is None:
+            raise AssertionError("data must be set before calling get_data()")
+
+        return [[self.data[r-1][c-1] for c in self.cols] for r in self.rows]
 
     def _get_array(self, spec):
         """ Return array of values specified by the row or column spec
@@ -850,6 +900,7 @@ class ImportSpreadsheet(object):
         re_letters = re.compile('[a-z]')
 
         # Split spec at commas (don't split range specs)
+        # TODO fix this so it never matches ""
         list_vals = re.split('(?<![-:])\s*,?\s*(?![-:])', spec)
 
         # Loop through split spec values
@@ -953,30 +1004,20 @@ class ImportXLSX (ImportSpreadsheet):
         else:
             xl_sheet = self.xl_wb[self.sheet]
 
-        # Look at all rows/columns when range not specified
-        if len(self.rows) == 0:
-            self.rows = range(1, xl_sheet.max_row + 1)
+        # Read in the spreadsheet values and create PreprocessorEntry objects
+        self.data = []
+        for r in range(1,xl_sheet.max_row + 1):
+            self.data.append([])
+            for c in range(1,xl_sheet.max_column + 1):
+                cell = xl_sheet.cell(r, c)
 
-        if len(self.cols) == 0:
-            self.cols = range(1, xl_sheet.max_column + 1)
+                tmp = PreprocessorEntry(self.entry.tag, parent=self.entry,
+                        elem=self.entry.elem, value=cell.value)
 
-        # Populate array with data from spreadsheet
-        array = []
-        for row_idx, row_num in enumerate(self.rows):
-            array.insert(row_idx, [])
-            for col_num in self.cols:
-                cell = xl_sheet.cell(row=row_num, column=col_num)
+                self.data[r-1].append(tmp)
 
-                # Create PreprocessorEntry for data and add to array
-                # TODO should this point to parent's element?
-                array[row_idx].append(PreprocessorEntry(self.entry.tag,
-                        parent=self.entry, elem=self.entry.elem,
-                        value=cell.value))
-
-                # TODO
-                #print("cell({},{})={}".format(row_num,col_num,cell.value))
-
-        return array
+        # Process the data and return it
+        return self.get_data()
 
 class ImportCSV(ImportSpreadsheet):
     """ This class extends ImportSpreadsheet to support csv files
@@ -1003,45 +1044,21 @@ class ImportCSV(ImportSpreadsheet):
         file_array = []
         max_col = 0
 
+        self.data = []
+
         # Read entire file into memory
         with open(filename, newline='') as csvfile:
             reader = csv.reader(csvfile)
-            for i,row in enumerate(reader):
-                # Add row to file array
-                file_array[i] = row
+            for r,row in enumerate(reader):
+                self.data.append([])
+                for val in row:
+                    tmp = PreprocessorEntry(self.entry.tag, parent=self.entry,
+                            elem=self.entry.elem, value=val)
 
-                # Update max column number
-                if (len(row) > max_col):
-                    max_col = len(row)
+                    self.data[r].append(tmp)
 
-        # Look at all rows/columns when range not specified
-        if len(self.rows) == 0:
-            self.rows = range(1, len(file_array)+1)
-
-        if len(self.cols) == 0:
-            self.cols = range(1, max_col + 1)
-
-        # Populate array with data from spreadsheet
-        array = []
-        for row_idx, row_num in enumerate(self.rows):
-            array.insert(row_idx, {})
-            for col_idx, col_num in enumerate(self.cols):
-
-                # If cell is outside range of file, set contents to ""
-                if (row_num > len(file_array) or col_num > max_col):
-                    val = ""
-
-                # Get data from file
-                else:
-                    val = file_array[row_num -1][col_num - 1]
-
-                # Create PreprocessorEntry for data and add to array
-                # TODO should this point to parent's element?
-                array[row_idx].append(PreprocessorEntry(self.entry.tag,
-                        parent=self.entry, elem=self.entry.elem,
-                        value=val))
-
-        return array
+        # Process the data and return it
+        return self.get_data()
 
 
 class PresentationPreprocessor:
