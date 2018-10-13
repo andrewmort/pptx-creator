@@ -285,6 +285,7 @@ class PresentationCreator:
         """
 
         self.invalid_images = []
+        self.invalid_imports = {}
 
         self.input  = path_input
         self.output = path_output
@@ -721,10 +722,21 @@ class PresentationCreator:
 
         # Spreadsheet file
         if (cat == "spreadsheet"):
+            num_row = None
+            num_col = None
+
             for child in entry.data:
                 # Ignore value entries (we already have filename
                 if (child.which == "value"):
                     continue
+
+                # Get number of rows expected
+                elif (child.tag == "num_row"):
+                    num_row = child.get_values(join=True)
+
+                # Get number of columns expected
+                elif (child.tag == "num_col"):
+                    num_col = child.get_values(join=True)
 
                 # Get row spec
                 elif (child.tag == "row"):
@@ -733,6 +745,50 @@ class PresentationCreator:
                 # Get col spec
                 elif (child.tag == "col"):
                     importer.add_col(child.get_values(join=True))
+
+                # Get row key
+                elif (child.tag == "row_key"):
+                    col = None
+                    re  = False
+
+                    # Get associated values
+                    for attr in child.data:
+                        if (attr.which == "value"):
+                            continue
+                        elif (attr.tag == "col"):
+                            col = attr.get_values(join=True)
+                        elif (attr.tag == "re"):
+                            re = attr.get_values(join=True)
+                        else:
+                            raise ValueError("invalid row_key import "\
+                                    "attribute \"{}\"\n{}"\
+                                    "".format(attr.tag,
+                                        self.ppp.error_info(attr)))
+
+                    importer.add_row_key(child.get_values(join=True),
+                        col=col, re=re)
+
+                # Get col key
+                elif (child.tag == "col_key"):
+                    row = None
+                    re  = False
+
+                    # Get associated values
+                    for attr in child.data:
+                        if (attr.which == "value"):
+                            continue
+                        elif (attr.tag == "row"):
+                            row = attr.get_values(join=True)
+                        elif (attr.tag == "re"):
+                            re = attr.get_values(join=True)
+                        else:
+                            raise ValueError("invalid col_key import "\
+                                    "attribute \"{}\"\n{}"\
+                                    "".format(attr.tag,
+                                        self.ppp.error_info(attr)))
+
+                    importer.add_col_key(child.get_values(join=True),
+                        col=col, re=re)
 
                 # Get sheet
                 elif (child.tag == "sheet"):
@@ -744,8 +800,51 @@ class PresentationCreator:
                             "".format(child.tag, self.ppp.error_info(child)))
 
 
-            # Get data from importer
-            entries = importer.read()
+            # Get spreadsheet data importer
+            error = False
+            entries = [[]]
+            try:
+                entries = importer.read()
+            except (IndexError, KeyError) as err:
+                error = True
+
+                # Add error message
+                msg = "{} \"{}\": {}".format(err.args[1],
+                        err.args[2], err.args[0])
+            except ValueError as err:
+                error = True
+
+                # Add error message
+                msg = "{}".format(err.args[0])
+
+            # Add error message to dictionary
+            if error:
+                if not str(path_file) in self.invalid_imports:
+                    self.invalid_import[str(path_file)] = []
+
+                self.invalid_import[str(path_file)].append(msg)
+
+            # Get number of rows from importer if not set
+            if num_row is None:
+                num_row = importer.num_row
+
+                if num_row is None:
+                    num_row = 1
+
+            # Get number of columns from importer if not set
+            if num_col is None:
+                num_col = importer.num_col
+
+                if num_col is None:
+                    num_col = 1
+
+            # Ensure size of entries matches number of columns and rows
+            if not len(entries) == num_row:
+                
+
+
+
+
 
         # Invalid category
         else:
@@ -830,16 +929,21 @@ class ImportSpreadsheet(object):
         """ Set the key used to match rows in the spreadsheet
 
         This adds a key to the list of keys used to filter the rows that
-        are returned from the spreadsheet. If the rows and columns are set,
-        the filter spec will operate on the data contained in those rows
-        and columns and will ignore any data outside those ranges. However,
-        it is possible to match on data that will not be returned by
-        providing a column spec (the same format as add_col() function), which
-        will limit the key search to the specified columns, even if that
-        column is not included in the set of columns to be returned.
+        are returned from the spreadsheet. The rows originally in the
+        set to be searched are those that were requested by the add_row()
+        function, if no rows are specified, all rows will be searched.
+        By default, the filter will search through all the columns for
+        each row looking for a match, regardless of the columns
+        requested by the add_col() function. To limit the columns
+        searched for each row, a col spec can be passed to this function
+        and the filtering will only look at those specified columns.
+        If a row matches the filtering, only the columns specified
+        by the add_col() function will be returned.
 
         Args:
-            row_key: a string used to match row data
+            row_key: a string used to select rows to return when that
+                row has data that matches the string
+                (by default all columns are searched unless col is specified)
 
         Kwargs:
             col: string specifying which columns to use when finding
@@ -851,8 +955,62 @@ class ImportSpreadsheet(object):
 
         self.row_keys.append({})
         self.row_keys[-1]["key"] = row_key
-        self.row_keys[-1]["col"] = self._get_array(col)
-        self.row_keys[-1]["re"]  = re
+
+        # Create re object when requested
+        if re:
+            self.row_keys[-1]["key"] = re.compile(row_key)
+        else:
+            self.row_keys[-1]["key"] = col_key
+
+        # Set col spec if specified
+        if not col is None:
+            self.row_keys[-1]["col"] = self._get_array(col)
+        else:
+            self.row_keys[-1]["col"] = None
+
+
+    def add_col_key(self, col_key, row=None, re=False):
+        """ Set the key used to match columns in the spreadsheet
+
+        This adds a key to the list of keys used to filter the columns that
+        are returned from the spreadsheet. The columns originally in the
+        set to be searched are those that were requested by the add_col()
+        function, if no columns are specified, all columns will be searched.
+        By default, the filter will search through all the rows for
+        each column looking for a match, regardless of the rows
+        requested by the add_row() function. To limit the rows
+        searched for each column, a row spec can be passed to this function
+        and the filtering will only look at those specified rows.
+        If a column matches the filtering, only the rows specified
+        by the add_row() function will be returned.
+
+        Args:
+            col_key: a string used to select columns to return when that
+                column has data that matches the string
+                (by default all rows are searched unless row is specified)
+
+        Kwargs:
+            row: string specifying which rows to use when finding
+                a match to the col_key
+            re: indicates whether regular expression foramtting is used
+                for the col_key string
+
+        """
+
+        self.col_keys.append({})
+        self.col_keys[-1]["re"]  = re
+
+        # Create re object when requested
+        if re:
+            self.col_keys[-1]["key"] = re.compile(col_key)
+        else:
+            self.col_keys[-1]["key"] = col_key
+
+        # Set row spec if specified
+        if not row is None:
+            self.col_keys[-1]["row"] = self._get_array(row)
+        else:
+            self.col_keys[-1]["row"] = None
 
     def get_data(self):
         """ Get data specified by column and row specifications
@@ -865,10 +1023,145 @@ class ImportSpreadsheet(object):
 
         """
 
+        # Data must be set
         if self.data is None:
             raise AssertionError("data must be set before calling get_data()")
 
-        return [[self.data[r-1][c-1] for c in self.cols] for r in self.rows]
+
+        # Create rows/cols array if they haven't been set
+        if self.rows is None:
+            self.rows = range(1, len(self.data)+1)
+
+        if self.cols is None:
+            if len(self.data) > 0:
+                self.cols = range(1, len(self.data[0])+1)
+            else:
+                self.cols = []
+
+
+        # Save number of rows/columns for error messages
+        if not self.row_keys is None:
+            self.num_row = 1
+        else:
+            self.num_row = len(self.rows)
+            if self.num_row < 1:
+                self.num_row = 1
+
+        if self.col_keys is None:
+            self.num_col = 1
+        else:
+            self.num_col = len(self.cols)
+            if self.num_col < 1:
+                self.num_col = 1
+
+
+        # Data is empty, return empty array
+        if (len(self.data) < 1 or len(self.data[0]) < 1):
+            raise ValueError("no data found")
+
+
+        # Go through each row_key and filter data
+        for rk in self.row_keys:
+            rk_match = False
+
+            # Only search specified rows
+            for r in self.rows:
+                match=False
+
+                # Get columns to search
+                rk_cols = rk["cols"]
+                if rk_cols is None:
+                    rk_cols = range(1, len(self.data[0])+1)
+
+                # Search through each column for key
+                for c in rk_cols:
+                    val = self.data[r-1][c-1].get_values(join=True)
+
+                    # Search for match
+                    if (rk["re"]):
+                        match = rk["key"].match(val)
+                    else:
+                        match = val.find(rk["key"]) > -1
+
+                    if match:
+                        break
+
+                # Remove row if it doesn't match
+                if not match:
+                    self.rows.remove(r)
+                else:
+                    rk_match = True
+
+            # When there
+            if not rk_match:
+                raise KeyError("no match found", "row key", str(rk.key))
+
+
+        # Update number of rows
+        self.num_row = len(self.rows)
+        if self.num_row < 1:
+            self.num_row = 1
+
+
+        # Go through each col_key and filter data
+        for ck in self.col_keys:
+            ck_match = False
+
+            # Only search specified columns
+            for c in self.cols:
+                match=False
+
+                # Get columns to search
+                ck_rows = ck["cols"]
+                if ck_rows is None:
+                    ck_rows = range(1, len(self.data)+1)
+
+                # Search through each row for key
+                for r in ck_rows:
+                    val = self.data[r-1][c-1].get_values(join=True)
+
+                    # Search for match
+                    if (ck["re"]):
+                        match = ck["key"].match(val)
+                    else:
+                        match = val.find(ck["key"]) > -1
+
+                    if match:
+                        break
+
+                # Remove column if it doesn't match
+                if not match:
+                    self.cols.remove(c)
+                else:
+                    ck_match = True
+
+            # When there
+            if not ck_match:
+                raise KeyError("no match found", "column key", str(rk.key))
+
+
+        # Update number of columns
+        self.num_col = len(self.rows)
+        if self.num_col < 1:
+            self.num_col = 1
+
+
+        # Generate return array
+        ret = []
+        for r in self.rows:
+            # Check if in range
+            if r >= len(self.data):
+                raise IndexError("index out of range", "row", str(r))
+
+            ret.append([])
+            for c in self.cols:
+                # Check if in range
+                if c >= len(self.data[r-1]):
+                    raise IndexError("index out of range", "column", str(c))
+
+                ret[r-1].append(self.data[r-1][c-1])
+
+        return ret
 
     def _get_array(self, spec):
         """ Return array of values specified by the row or column spec
@@ -932,8 +1225,14 @@ class ImportSpreadsheet(object):
                 else:
                     tmp = int(range_val)
 
+                # Value must be greater 0
+                if tmp < 1:
+                    raise ValueError("index \"{}\" cannot be less than 1 in"
+                            "row/column spec \"{}\"".format(range_val, spec))
+
                 # Store result into range_vals
                 range_vals[i] = tmp
+
 
             # Range spec, create range
             if (len(range_vals) == 2 or len(range_vals) == 3):
@@ -1009,7 +1308,7 @@ class ImportXLSX (ImportSpreadsheet):
         for r in range(1,xl_sheet.max_row + 1):
             self.data.append([])
             for c in range(1,xl_sheet.max_column + 1):
-                cell = xl_sheet.cell(r, c)
+                cell = xl_sheet.cell(row=r, column=c)
 
                 tmp = PreprocessorEntry(self.entry.tag, parent=self.entry,
                         elem=self.entry.elem, value=cell.value)
@@ -1047,7 +1346,7 @@ class ImportCSV(ImportSpreadsheet):
         self.data = []
 
         # Read entire file into memory
-        with open(filename, newline='') as csvfile:
+        with open(self.filename) as csvfile:
             reader = csv.reader(csvfile)
             for r,row in enumerate(reader):
                 self.data.append([])

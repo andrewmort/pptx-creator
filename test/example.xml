@@ -3,7 +3,7 @@
   <set var="path">./test/</set>
   <set var="img_path"  prepend="path">images/</set>
   <set var="xlsx_path" prepend="path">instrument_frequencies.xlsx</set>
-  <set var="data_path"><get var="path"/>instrument_types.csv</set>
+  <set var="csv_path"><get var="path"/>instrument_types.csv</set>
 
   <!-- ################################### -->
   <!-- Title                               -->
@@ -25,18 +25,34 @@
     </placeholder>
   </slide>
 
-  <slide label="section" layout="2content">
-    <content0 type="table">
-      <import prepend="xlsx_path" row="1" col="a-c" sheet="freqs"/>
+  <slide label="section" layout="1content">
+    <content type="table">
       <row>
-        <cell/>
-        <import prepend="xlsx_path" row="6,7,8" col="2,3" sheet="freqs"/>
+        <import prepend="xlsx_path" row="1" col="a-c"/>
+        <import prepend="csv_path" row="1" col="d"/>
       </row>
       <row>
-        <cell>Row 7 </cell>
-        <cell>test </cell>
+        <set var="inst">Cello</set>
+        <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
       </row>
-    </content0>
+      <row>
+        <set var="inst">Flute</set>
+        <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
+      </row>
+      <row>
+        <set var="inst">Guitar</set>
+        <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
+      </row>
+      <row>
+        <set var="inst">Piano</set>
+        <cell prepend="inst"/>
+        <import prepend="xlsx_path" col="b-c"> <row_key prepend="inst"/> </import>
+        <cell>Percussion</cell>
+      </row>
+    </content>
   </slide>
 
   <slide label="example1" layout="1content">
