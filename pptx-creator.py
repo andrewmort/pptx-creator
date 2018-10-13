@@ -308,7 +308,14 @@ class PresentationCreator:
             for img in self.invalid_images:
                 print("  " + img)
 
-        # Save file
+        # Report invalid table entries
+        if (len(self.invalid_imports) > 0):
+            print("\nInvalid Import: ")
+            for path,errors in self.invalid_imports.items():
+                print("  " + path)
+                for msg in errors:
+                    print("    " + msg)
+
         self.prs.save(str(self.output))
 
         print("\nPresentation created: {}\n".format(self.output))
@@ -606,6 +613,7 @@ class PresentationCreator:
                     elif (col.tag == "import"):
                         cur_col += 1
 
+                        # TODO -- need to fix tables spanning multiple rows
                         # Add entries to table without changing cur_row
                         for i,irow in enumerate(self._import(col)):
                             if len(table) <= cur_row + i:
@@ -820,9 +828,9 @@ class PresentationCreator:
             # Add error message to dictionary
             if error:
                 if not str(path_file) in self.invalid_imports:
-                    self.invalid_import[str(path_file)] = []
+                    self.invalid_imports[str(path_file)] = []
 
-                self.invalid_import[str(path_file)].append(msg)
+                self.invalid_imports[str(path_file)].append(msg)
 
             # Get number of rows from importer if not set
             if num_row is None:
@@ -838,20 +846,53 @@ class PresentationCreator:
                 if num_col is None:
                     num_col = 1
 
+
+            # Create temporary PreprocessEntry for any unspecified cells
+            tmp = PreprocessorEntry(entry.tag, parent=entry,
+                    elem=entry.elem, value="N/A")
+
             # Ensure size of entries matches number of columns and rows
-            if not len(entries) == num_row:
-                
+            valid_entries = []
+            for i in range(0, num_row):
+                valid_entries.append([])
 
+                for j in range(0, num_col):
+                    if (len(entries) > i and len(entries[i]) > j):
+                        valid_entries[i].append(entries[i][j])
+                    else:
+                        valid_entries[i].append(tmp)
 
+            # TODO -- show warnings for num col/row mismatch
+            # TODO -- show line numbers for invalid imports
+            # Check for change in size of rows
+            if (len(valid_entries) != len(entries)):
+                msg = "row number mismatch: expected {}, got {}"\
+                    "".format(len(valid_entries), len(entries))
 
+                # TODO
+                #if not str(path_file) in self.invalid_imports:
+                    #self.invalid_imports[str(path_file)] = []
 
+                #self.invalid_imports[str(path_file)].append(msg)
+
+            # Check for change in size of columns
+            entries_col = (0 if len(entries) == 0 else len(entries[0]))
+            if (len(valid_entries[0]) != entries_col):
+                msg = "column number mismatch: expected {}, got {}"\
+                    "".format(len(valid_entries), entries_col)
+
+                # TODO
+                #if not str(path_file) in self.invalid_imports:
+                    #self.invalid_imports[str(path_file)] = []
+
+                #self.invalid_imports[str(path_file)].append(msg)
 
         # Invalid category
         else:
             raise AssertionError("invalid import category \"{}\""\
                     "".format(cat))
 
-        return entries
+        return valid_entries
 
 class ImportSpreadsheet(object):
     """ Inherited by classes uses to read specific Spreadsheet file formats
@@ -954,13 +995,13 @@ class ImportSpreadsheet(object):
         """
 
         self.row_keys.append({})
-        self.row_keys[-1]["key"] = row_key
+        self.row_keys[-1]["re"] = re
 
         # Create re object when requested
         if re:
             self.row_keys[-1]["key"] = re.compile(row_key)
         else:
-            self.row_keys[-1]["key"] = col_key
+            self.row_keys[-1]["key"] = row_key
 
         # Set col spec if specified
         if not col is None:
@@ -1029,25 +1070,25 @@ class ImportSpreadsheet(object):
 
 
         # Create rows/cols array if they haven't been set
-        if self.rows is None:
-            self.rows = range(1, len(self.data)+1)
+        if len(self.rows) == 0:
+            self.rows = list(range(1, len(self.data)+1))
 
-        if self.cols is None:
+        if len(self.cols) == 0:
             if len(self.data) > 0:
-                self.cols = range(1, len(self.data[0])+1)
+                self.cols = list(range(1, len(self.data[0])+1))
             else:
                 self.cols = []
 
 
         # Save number of rows/columns for error messages
-        if not self.row_keys is None:
+        if len(self.row_keys) == 0:
             self.num_row = 1
         else:
             self.num_row = len(self.rows)
             if self.num_row < 1:
                 self.num_row = 1
 
-        if self.col_keys is None:
+        if len(self.col_keys) == 0:
             self.num_col = 1
         else:
             self.num_col = len(self.cols)
@@ -1064,14 +1105,15 @@ class ImportSpreadsheet(object):
         for rk in self.row_keys:
             rk_match = False
 
+            # Get columns to search
+            rk_cols = rk["col"]
+            if rk_cols is None:
+                rk_cols = list(range(1, len(self.data[0])+1))
+
             # Only search specified rows
+            valid_rows = list(self.rows)
             for r in self.rows:
                 match=False
-
-                # Get columns to search
-                rk_cols = rk["cols"]
-                if rk_cols is None:
-                    rk_cols = range(1, len(self.data[0])+1)
 
                 # Search through each column for key
                 for c in rk_cols:
@@ -1083,18 +1125,26 @@ class ImportSpreadsheet(object):
                     else:
                         match = val.find(rk["key"]) > -1
 
+                    # TODO - delete
+                    #print("k:{}, r:{}, c:{}, match:{}".format(str(rk["key"]),
+                    #    r, c, (1 if match else 0)))
+
                     if match:
                         break
 
                 # Remove row if it doesn't match
                 if not match:
-                    self.rows.remove(r)
+                    valid_rows.remove(r)
                 else:
                     rk_match = True
 
+            # Update rows with valid_rows
+            self.rows = valid_rows
+
             # When there
             if not rk_match:
-                raise KeyError("no match found", "row key", str(rk.key))
+                raise KeyError("no match found", "row key", str(rk["key"]))
+
 
 
         # Update number of rows
@@ -1107,14 +1157,15 @@ class ImportSpreadsheet(object):
         for ck in self.col_keys:
             ck_match = False
 
+            # Get rows to search
+            ck_rows = ck["row"]
+            if ck_rows is None:
+                ck_rows = list(range(1, len(self.data)+1))
+
             # Only search specified columns
+            valid_cols = list(self.cols)
             for c in self.cols:
                 match=False
-
-                # Get columns to search
-                ck_rows = ck["cols"]
-                if ck_rows is None:
-                    ck_rows = range(1, len(self.data)+1)
 
                 # Search through each row for key
                 for r in ck_rows:
@@ -1131,9 +1182,12 @@ class ImportSpreadsheet(object):
 
                 # Remove column if it doesn't match
                 if not match:
-                    self.cols.remove(c)
+                    valid_cols.remove(c)
                 else:
                     ck_match = True
+
+            # Update cols with valid_cols
+            self.cols = valid_cols
 
             # When there
             if not ck_match:
@@ -1141,25 +1195,25 @@ class ImportSpreadsheet(object):
 
 
         # Update number of columns
-        self.num_col = len(self.rows)
+        self.num_col = len(self.cols)
         if self.num_col < 1:
             self.num_col = 1
 
 
         # Generate return array
         ret = []
-        for r in self.rows:
+        for i,r in enumerate(self.rows):
             # Check if in range
-            if r >= len(self.data):
+            if r > len(self.data):
                 raise IndexError("index out of range", "row", str(r))
 
             ret.append([])
             for c in self.cols:
                 # Check if in range
-                if c >= len(self.data[r-1]):
+                if c > len(self.data[r-1]):
                     raise IndexError("index out of range", "column", str(c))
 
-                ret[r-1].append(self.data[r-1][c-1])
+                ret[i].append(self.data[r-1][c-1])
 
         return ret
 
@@ -1930,7 +1984,7 @@ class PreprocessorEntry:
                     if pp.which == "entry" and pp.tag == tag]
 
         # Get values in data array
-        values = [pp.value for pp in self.data if pp.which == "value"]
+        values = [str(pp.value) for pp in self.data if pp.which == "value"]
 
         if join:
             return ''.join(values)

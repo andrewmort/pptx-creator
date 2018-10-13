@@ -29,22 +29,22 @@
     <content type="table">
       <row>
         <import prepend="xlsx_path" row="1" col="a-c"/>
-        <import prepend="csv_path" row="1" col="d"/>
+        <import prepend="csv_path" row="1" col="b"/>
       </row>
       <row>
         <set var="inst">Cello</set>
         <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
-        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
       </row>
       <row>
         <set var="inst">Flute</set>
         <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
-        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
       </row>
       <row>
         <set var="inst">Guitar</set>
         <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
-        <import prepend="csv_path"  col="d">   <row_key prepend="inst"/> </import>
+        <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
       </row>
       <row>
         <set var="inst">Piano</set>
