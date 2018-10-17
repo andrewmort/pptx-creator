@@ -37,21 +37,22 @@
         <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
       </row>
       <row>
-        <set var="inst">Flute</set>
-        <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
-        <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
-      </row>
-      <row>
-        <set var="inst">Guitar</set>
-        <import prepend="xlsx_path" col="a-c"> <row_key prepend="inst"/> </import>
-        <import prepend="csv_path"  col="b">   <row_key prepend="inst"/> </import>
-      </row>
-      <row>
         <set var="inst">Piano</set>
         <cell prepend="inst"/>
         <import prepend="xlsx_path" col="b-c"> <row_key prepend="inst"/> </import>
         <cell>Percussion</cell>
       </row>
+      <row>
+        <cell>Vocal Male</cell>
+        <import prepend="xlsx_path" col="b-c" row="5-6"/>
+        <import prepend="csv_path"  col="b"   row_key="Vocal Baritone"/>
+      </row>
+      <row>
+        <cell/>
+        <import prepend="csv_path"  col="b"   row_key="Vocal Bass"/>
+      </row>
+      <import prepend="xlsx_path" col="a-c" row_key="None"/>
+      <import prepend="xlsx_path" col="a-c" row_key="Bassoon"/>
     </content>
   </slide>
 

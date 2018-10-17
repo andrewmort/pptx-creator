@@ -30,13 +30,12 @@
 #   - add bulleted list placeholder type
 #
 
-import openpyxl # Import data from xlsx files
-
 # Force python XML parser not faster C accelerators
 # because we can't hook the C implementation
 import sys
 sys.modules['_elementtree'] = None
 
+import openpyxl # Import data from xlsx files
 from pptx import Presentation
 import xml.etree.ElementTree as ET
 import datetime
@@ -311,10 +310,13 @@ class PresentationCreator:
         # Report invalid table entries
         if (len(self.invalid_imports) > 0):
             print("\nInvalid Import: ")
-            for path,errors in self.invalid_imports.items():
+            for path,lines in self.invalid_imports.items():
                 print("  " + path)
-                for msg in errors:
-                    print("    " + msg)
+
+                for info,errors in lines.items():
+                    print("    - " + info)
+                    for msg in errors:
+                        print("        * " + msg)
 
         self.prs.save(str(self.output))
 
@@ -591,46 +593,50 @@ class PresentationCreator:
                                 "placeholder, expected cell element.\n{}"\
                                 "".format(row.value, self.ppp.error_info(col)))
 
+                    # Find where to insert next cell
+                    while(True):
+                        cur_col += 1
+
+                        # Add data if at end of row
+                        if len(table[cur_row]) <= cur_col:
+                            table[cur_row].append(None)
+                            break
+
+                        # Add data if current cell is empty
+                        elif table[cur_row][cur_col] is None:
+                            break
+
                     # Add cell entry to table array
                     if (col.tag == "cell"):
-                        while(True):
-                            cur_col += 1
-
-                            # Add data if at end of row
-                            if len(table[cur_row]) <= cur_col:
-                                table[cur_row].append(col)
-                                break
-
-                            # Add data if current cell is empty
-                            elif table[cur_row][cur_col] is None:
-                                table[cur_row][cur_col] = col
-                                break
-
-                        # TODO - delete me
-                        #print ("row={}\n  {}".format(cur_row, str(table[cur_row])))
+                        table[cur_row][cur_col] = col
 
                     # Add import entries to table array
                     elif (col.tag == "import"):
-                        cur_col += 1
+                        next_col = cur_col - 1
 
-                        # TODO -- need to fix tables spanning multiple rows
                         # Add entries to table without changing cur_row
                         for i,irow in enumerate(self._import(col)):
                             if len(table) <= cur_row + i:
-                                table.insert(cur_row + i, [])
+                                table.append([])
 
                             # Add preceding cells when cur_col != 0
                             row_len = len(table[cur_row + i])
                             if (row_len < cur_col):
                                 for j in range(row_len,cur_col):
-                                    table[cur_row + i].insert(j, None)
+                                    table[cur_row + i].append(None)
 
                             # Insert entries into table
                             for j,icol in enumerate(irow):
-                                table[cur_row + i].insert(cur_col + j, icol)
+                                if (len(table[cur_row+i]) <= cur_col + j):
+                                    table[cur_row + i].append(icol)
+                                else:
+                                    table[cur_row + i][cur_col + j] = icol
 
-                            # TODO - delete me
-                            #print ("row={}\n  {}".format(cur_row + i, str(table[cur_row + i])))
+                                # Determine in which column the import ends
+                                if (j == 0):
+                                    next_col += 1
+
+                        cur_col = next_col
 
                     # Invalid element
                     else:
@@ -677,9 +683,6 @@ class PresentationCreator:
                 # Some cells may be empty
                 elif (table[i][j] is None):
                     continue
-
-                #TODO - delete me
-                #print("row:{},col:{},data:{}".format(i, j, table[i][j]))
 
                 # Add text from element to cell
                 self._prs_insert_text(table[i][j], prs_table.cell(i,j))
@@ -809,6 +812,8 @@ class PresentationCreator:
 
 
             # Get spreadsheet data importer
+            error_info = "{}, element {} on line {}".format(self.ppp.source,
+                    child.parent.tag, child.elem._start_line_number)
             error = False
             entries = [[]]
             try:
@@ -828,9 +833,12 @@ class PresentationCreator:
             # Add error message to dictionary
             if error:
                 if not str(path_file) in self.invalid_imports:
-                    self.invalid_imports[str(path_file)] = []
+                    self.invalid_imports[str(path_file)] = {}
 
-                self.invalid_imports[str(path_file)].append(msg)
+                if not error_info in self.invalid_imports[str(path_file)]:
+                    self.invalid_imports[str(path_file)][error_info] = []
+
+                self.invalid_imports[str(path_file)][error_info].append(msg)
 
             # Get number of rows from importer if not set
             if num_row is None:
@@ -845,7 +853,6 @@ class PresentationCreator:
 
                 if num_col is None:
                     num_col = 1
-
 
             # Create temporary PreprocessEntry for any unspecified cells
             tmp = PreprocessorEntry(entry.tag, parent=entry,
@@ -862,18 +869,18 @@ class PresentationCreator:
                     else:
                         valid_entries[i].append(tmp)
 
-            # TODO -- show warnings for num col/row mismatch
-            # TODO -- show line numbers for invalid imports
             # Check for change in size of rows
             if (len(valid_entries) != len(entries)):
                 msg = "row number mismatch: expected {}, got {}"\
                     "".format(len(valid_entries), len(entries))
 
-                # TODO
-                #if not str(path_file) in self.invalid_imports:
-                    #self.invalid_imports[str(path_file)] = []
+                if not str(path_file) in self.invalid_imports:
+                    self.invalid_imports[str(path_file)] = {}
 
-                #self.invalid_imports[str(path_file)].append(msg)
+                if not error_info in self.invalid_imports[str(path_file)]:
+                    self.invalid_imports[str(path_file)][error_info] = []
+
+                self.invalid_imports[str(path_file)][error_info].append(msg)
 
             # Check for change in size of columns
             entries_col = (0 if len(entries) == 0 else len(entries[0]))
@@ -881,11 +888,13 @@ class PresentationCreator:
                 msg = "column number mismatch: expected {}, got {}"\
                     "".format(len(valid_entries), entries_col)
 
-                # TODO
-                #if not str(path_file) in self.invalid_imports:
-                    #self.invalid_imports[str(path_file)] = []
+                if not str(path_file) in self.invalid_imports:
+                    self.invalid_imports[str(path_file)] = {}
 
-                #self.invalid_imports[str(path_file)].append(msg)
+                if not error_info in self.invalid_imports[str(path_file)]:
+                    self.invalid_imports[str(path_file)][error_info] = []
+
+                self.invalid_imports[str(path_file)][error_info].append(msg)
 
         # Invalid category
         else:
@@ -1081,14 +1090,14 @@ class ImportSpreadsheet(object):
 
 
         # Save number of rows/columns for error messages
-        if len(self.row_keys) == 0:
+        if len(self.row_keys) > 0:
             self.num_row = 1
         else:
             self.num_row = len(self.rows)
             if self.num_row < 1:
                 self.num_row = 1
 
-        if len(self.col_keys) == 0:
+        if len(self.col_keys) > 0:
             self.num_col = 1
         else:
             self.num_col = len(self.cols)
@@ -1125,10 +1134,6 @@ class ImportSpreadsheet(object):
                     else:
                         match = val.find(rk["key"]) > -1
 
-                    # TODO - delete
-                    #print("k:{}, r:{}, c:{}, match:{}".format(str(rk["key"]),
-                    #    r, c, (1 if match else 0)))
-
                     if match:
                         break
 
@@ -1144,7 +1149,6 @@ class ImportSpreadsheet(object):
             # When there
             if not rk_match:
                 raise KeyError("no match found", "row key", str(rk["key"]))
-
 
 
         # Update number of rows
