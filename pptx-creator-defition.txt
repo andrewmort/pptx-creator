@@ -269,3 +269,40 @@ Presentation
           <image>image_path.png</image>
         </slide>
 
+Text Element
+  Blah blah...
+
+  Date
+    The date can be inserted to a text element using the <date/> element.
+
+    For example:
+      <slide label="title" layout="title">
+        <title text="My Title"/>
+        <subtitle>
+          Compiled on: <date/>.
+        </subtitle>
+      </slide>
+
+  Links
+    A to another slide or to a website can be added to text using the <link/> element.
+
+    For a website, the link should be specified with the addr attribute and a text
+    or the value of the element will be used as the text for the user to click.
+
+    For a link to another slide in the presentation, the ref attribute can be
+    used. The value of ref will be the value of the label defined when 
+    creating the target slide.
+
+    For example:
+      <slide label="slide1" layout="1content"\>
+        <content>
+          <link addr="www.google.com">Google</link>
+        </content>
+      </slide>
+
+      <slide label="slide2" layout="1content"\>
+        <content>
+          <link ref="slide1">Return to slide 1</link>
+        </content>
+      </slide>
+    

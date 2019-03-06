@@ -33,10 +33,12 @@
 # Force python XML parser not faster C accelerators
 # because we can't hook the C implementation
 import sys
-sys.modules['_elementtree'] = None
+#sys.modules['_elementtree'] = None
 
 import openpyxl # Import data from xlsx files
 from pptx import Presentation
+from pptx.enum.action import PP_ACTION
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 import xml.etree.ElementTree as ET
 import datetime
 import os
@@ -343,7 +345,7 @@ class PresentationCreator:
         self.refs        = {}
 
         # Iterate through slides
-        for slide in root_entry.data:
+        for i,slide in enumerate(root_entry.data):
             # Get slide layout
             layout_vals = slide.get_values(tag="layout", join=True)
 
@@ -405,6 +407,7 @@ class PresentationCreator:
                             "template\n{}"\
                             "".format(ph.tag, self.ppp.error_info(ph)))
 
+                self.cur_slide = self.slides[i]
                 prs_ph = self.slides[i].placeholders[ph_idx]
 
                 # Determine if placeholder has a type
@@ -466,20 +469,55 @@ class PresentationCreator:
 
         """
 
-        text = ""
+        para = prs_object.text_frame.paragraphs[0]
 
         for sub in entry.data:
             if (sub.which == "value"):
-                text += str(sub.value)
+                run = para.add_run()
+                run.text = str(sub.value)
                 continue
 
             if (sub.tag == "date"):
-                text += datetime.datetime.now().strftime("%B %d, %Y")
+                run = para.add_run()
+                run.text = datetime.datetime.now().strftime("%B %d, %Y")
+
+            elif (sub.tag == "link"):
+                run = para.add_run()
+                run.text = sub.get_values(join=True)
+
+                for sub_link in sub.data:
+                    if (sub_link.which == "value"):
+                        continue
+
+                    if (sub_link.tag == "addr"):
+                        run.hyperlink.address = sub_link.get_values(join=True)
+                    elif (sub_link.tag == "ref"):
+                        ref_val = sub_link.get_values(join=True)
+
+                        try:
+                            ref_slide = self.refs[ref_val]
+                        except KeyError as err:
+                            raise ValueError("link reference \"{}\""\
+                                    "not found.\n{}".format(ref_val, \
+                                    self.ppp.error_info(sub_link)))
+
+                        rId = self.cur_slide.part.relate_to(ref_slide.part, RT.SLIDE)
+                        rPr = run._r.get_or_add_rPr()
+
+                        hlinkClick = rPr.add_hlinkClick(rId)
+                        hlinkClick.set('action', 'ppaction://hlinksldjump')
+
+                    else:
+                        raise ValueError("invalid link attribute \"{}\"\n{}"\
+                                "".format(sub_link.tag, \
+                                          self.ppp.error_info(sub_link)))
+
+
+
             else:
                 raise ValueError("invalid \"{}\" entry in text placeholder."\
                         "\n{}".format(sub.tag, self.ppp.error_info(sub)))
 
-        prs_object.text = text
 
     def _ph_text(self, entry, prs_ph, prs_slide):
         """ Add text to the placeholder
@@ -743,11 +781,11 @@ class PresentationCreator:
 
                 # Get number of rows expected
                 elif (child.tag == "num_row"):
-                    num_row = child.get_values(join=True)
+                    num_row = int(child.get_values(join=True))
 
                 # Get number of columns expected
                 elif (child.tag == "num_col"):
-                    num_col = child.get_values(join=True)
+                    num_col = int(child.get_values(join=True))
 
                 # Get row spec
                 elif (child.tag == "row"):
@@ -777,7 +815,7 @@ class PresentationCreator:
                                         self.ppp.error_info(attr)))
 
                     importer.add_row_key(child.get_values(join=True),
-                        col=col, re=re)
+                        col=col, is_re=re)
 
                 # Get col key
                 elif (child.tag == "col_key"):
@@ -799,7 +837,7 @@ class PresentationCreator:
                                         self.ppp.error_info(attr)))
 
                     importer.add_col_key(child.get_values(join=True),
-                        col=col, re=re)
+                        row=row, is_re=re)
 
                 # Get sheet
                 elif (child.tag == "sheet"):
@@ -975,7 +1013,7 @@ class ImportSpreadsheet(object):
         # Add values from column spec to column array
         self.cols += self._get_array(col)
 
-    def add_row_key(self, row_key, col=None, re=False):
+    def add_row_key(self, row_key, col=None, is_re=False):
         """ Set the key used to match rows in the spreadsheet
 
         This adds a key to the list of keys used to filter the rows that
@@ -1004,13 +1042,13 @@ class ImportSpreadsheet(object):
         """
 
         self.row_keys.append({})
-        self.row_keys[-1]["re"] = re
+        self.row_keys[-1]["val"] = row_key
 
         # Create re object when requested
-        if re:
+        if is_re:
             self.row_keys[-1]["key"] = re.compile(row_key)
         else:
-            self.row_keys[-1]["key"] = row_key
+            self.row_keys[-1]["key"] = re.compile("^" + row_key + "$")
 
         # Set col spec if specified
         if not col is None:
@@ -1019,7 +1057,7 @@ class ImportSpreadsheet(object):
             self.row_keys[-1]["col"] = None
 
 
-    def add_col_key(self, col_key, row=None, re=False):
+    def add_col_key(self, col_key, row=None, is_re=False):
         """ Set the key used to match columns in the spreadsheet
 
         This adds a key to the list of keys used to filter the columns that
@@ -1048,13 +1086,13 @@ class ImportSpreadsheet(object):
         """
 
         self.col_keys.append({})
-        self.col_keys[-1]["re"]  = re
+        self.col_keys[-1]["val"] = col_key
 
         # Create re object when requested
-        if re:
+        if is_re:
             self.col_keys[-1]["key"] = re.compile(col_key)
         else:
-            self.col_keys[-1]["key"] = col_key
+            self.col_keys[-1]["key"] = re.compile("^" + col_key + "$")
 
         # Set row spec if specified
         if not row is None:
@@ -1129,10 +1167,7 @@ class ImportSpreadsheet(object):
                     val = self.data[r-1][c-1].get_values(join=True)
 
                     # Search for match
-                    if (rk["re"]):
-                        match = rk["key"].match(val)
-                    else:
-                        match = val.find(rk["key"]) > -1
+                    match = rk["key"].match(val.strip())
 
                     if match:
                         break
@@ -1148,7 +1183,7 @@ class ImportSpreadsheet(object):
 
             # When there
             if not rk_match:
-                raise KeyError("no match found", "row key", str(rk["key"]))
+                raise KeyError("no match found", "row key", str(rk["val"]))
 
 
         # Update number of rows
@@ -1176,10 +1211,7 @@ class ImportSpreadsheet(object):
                     val = self.data[r-1][c-1].get_values(join=True)
 
                     # Search for match
-                    if (ck["re"]):
-                        match = ck["key"].match(val)
-                    else:
-                        match = val.find(ck["key"]) > -1
+                    match = ck["key"].match(val.strip())
 
                     if match:
                         break
@@ -1195,7 +1227,7 @@ class ImportSpreadsheet(object):
 
             # When there
             if not ck_match:
-                raise KeyError("no match found", "column key", str(rk.key))
+                raise KeyError("no match found", "column key", str(ck["val"]))
 
 
         # Update number of columns
