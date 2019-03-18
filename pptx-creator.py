@@ -26,7 +26,6 @@
 #
 # TODO
 #   - work on text spacing between different values
-#   - add table placeholder type
 #   - add bulleted list placeholder type
 #
 
@@ -474,7 +473,15 @@ class PresentationCreator:
         for sub in entry.data:
             if (sub.which == "value"):
                 run = para.add_run()
-                run.text = str(sub.value)
+
+                # Try to handle unicode characters
+                try:
+                    run.text  = sub.value.encode('utf-8')
+
+                # Convert all non-strings to strings
+                except AttributeError as err:
+                    run.text = str(sub.value)
+
                 continue
 
             if (sub.tag == "date"):
@@ -607,6 +614,9 @@ class PresentationCreator:
         """
 
         table = []
+        col_weights = []
+        row_weights = []
+        row_min = False
         max_col = 0
         cur_row = -1
 
@@ -617,7 +627,69 @@ class PresentationCreator:
                         "placeholder, expected row element.\n{}"\
                         "".format(row.value, self.ppp.error_info(row)))
 
-            if (row.tag == "row"):
+            # Setting element -> to specify table settings
+            if (row.tag == "setting"):
+                curw_col = -1
+                curw_row = -1
+
+                for setting in row.data:
+                    if (setting.which == "value"):
+                        raise ValueError("invalid value \"{}\" in setting "\
+                                "element, expected setting element.\n{}"\
+                                "".format(setting.value, self.ppp.error_info(setting)))
+
+                    # column element -> to specify specific column's weight
+                    elif (setting.tag == "col"):
+
+                        # Add new empty weight entry to weights array
+                        curw_col += 1
+                        if len(col_weights) <= curw_col:
+                            col_weights.insert(curw_col, 1)
+
+                        for spec in setting.data:
+                            if (spec.which == "value"):
+                                raise ValueError("invalid value \"{}\" in setting "\
+                                        "element, expected spec element.\n{}"\
+                                        "".format(spec.value, self.ppp.error_info(setting)))
+
+                            # Add weights to array
+                            elif (spec.tag == "weight"):
+                                col_weights[curw_col] = float(spec.get_values(join = True))
+
+                    # column element -> to specify specific column's weight
+                    elif (setting.tag == "row"):
+
+                        # Add new empty weight entry to weights array
+                        curw_row += 1
+                        if len(row_weights) <= curw_row:
+                            row_weights.insert(curw_row, 1)
+
+                        for spec in setting.data:
+                            if (spec.which == "value"):
+                                raise ValueError("invalid value \"{}\" in setting "\
+                                        "element, expected spec element.\n{}"\
+                                        "".format(spec.value, self.ppp.error_info(setting)))
+
+                            # Add weights to array
+                            elif (spec.tag == "weight"):
+                                temp = spec.get_values(join = True)
+                                try:
+                                    row_weights[curw_row] = float(temp)
+                                except ValueError as err:
+                                    if temp == "min":
+                                        row_min = True
+                                    else:
+                                        raise err
+
+                    # Invalid element
+                    else:
+                        raise ValueError("invalid element \"{}\" in table "\
+                                "setting, expected setting element.\n{}"\
+                                "".format(setting.tag, self.ppp.error_info(setting)))
+
+
+            # Row element of table
+            elif (row.tag == "row"):
                 # Initialize new row in array
                 cur_row += 1
                 cur_col = -1
@@ -724,6 +796,44 @@ class PresentationCreator:
 
                 # Add text from element to cell
                 self._prs_insert_text(table[i][j], prs_table.cell(i,j))
+
+        # Set column weights based on text and user request
+        tot_weight = 0
+        tot_width = 0
+        prs_cols = prs_table.columns
+        for i in range(0,len(prs_cols)):
+            # Any unspecified columns have a weight of 1
+            if len(col_weights) <= i:
+                col_weights.insert(i,1)
+
+            tot_weight = tot_weight + col_weights[i]
+            tot_width  = tot_width  + prs_cols[i].width
+
+        for i in range(0,len(prs_cols)):
+            prs_cols[i].width = int(tot_width * col_weights[i] / tot_weight)
+
+        # Set row weights based on text and user request
+        tot_weight = 0
+        tot_height = 0
+        prs_rows = prs_table.rows
+        for i in range(0,len(prs_rows)):
+            # Any unspecified rows have a weight of 1
+            if len(row_weights) <= i:
+                row_weights.insert(i,1)
+
+            # Set so that all rows are set to 1 for height
+            if row_min:
+                row_weights[i] = 1
+                tot_weight  = tot_weight + row_weights[i]
+                tot_height  = tot_height + row_weights[i]
+
+            # Set so that all rows are set to height based on weight
+            else:
+                tot_weight  = tot_weight + row_weights[i]
+                tot_height  = tot_height  + prs_rows[i].height
+
+        for i in range(0,len(prs_rows)):
+            prs_rows[i].height = int(tot_height * row_weights[i] / tot_weight)
 
     def _import(self, entry):
         """ Import data from file for presentation

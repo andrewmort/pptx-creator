@@ -305,4 +305,43 @@ Text Element
           <link ref="slide1">Return to slide 1</link>
         </content>
       </slide>
-    
+
+Table Element
+  blah blah...
+
+  Importing Data
+    Table data can be imported from a XLSX spreadsheet or a CSV file. The
+    data can be imported as a row, as a group of cells, or as an individual
+    cell.
+
+    TODO - blah blah
+
+
+  Column Width
+    Column width can be specified using weights. This allows the size of the
+    table to remain the same while each column can be scaled appropriately.
+
+    All columns have a weight of 1 by default.
+
+    For example:
+      <slide layout="1content\>
+        <content type="table">
+          <setting>
+            <col weight="2"/>
+            <col weight="1"/>
+            <col weight="1"/>
+            <col weight="1"/>
+            <col weight="1"/>
+            <col weight="4"/>
+          </setting>
+          <row>
+            <cell>Spec</cell>
+            <cell>Min</cell>
+            <cell>Nom</cell>
+            <cell>Max</cell>
+            <cell>Unit</cell>
+            <cell>Description</cell>
+          </row>
+        </content>
+      </slide>
+
