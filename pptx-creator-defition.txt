@@ -345,3 +345,51 @@ Table Element
         </content>
       </slide>
 
+  Row Height
+    Row height can be specified using weights, as with columns, or all rows
+    can be set to use the minimum possible verticle space based on the 
+    contents of the row.
+
+    All rows have a weight of 1 by default.
+
+    To use the mimum row height, specify a weight of "min" and it will apply
+    to all rows in the table. At this time, there isn't a way to use min for
+    one row and weights for the remaining rows.
+
+    For example:
+      <slide layout="1content\>
+        <content type="table">
+          <setting>
+            <row weight="min"/>
+          </setting>
+          <row>
+            <cell>row 1</cell>
+          </row>
+          <row>
+            <cell>row 2</cell>
+          </row>
+        </content>
+      </slide>
+
+List Element
+  A list element can be used to create a bulleted list on a slide. This
+  relies on the underlying placeholder being defined with bullets.
+
+  The items of a list are defined with a heirarchy, such that subitems
+  appear idented under the parent item. Any special text features can be
+  used in a list, such as links and date insertion.
+
+  For example:
+      <slide layout="1content\>
+        <content type="list">
+          <item>a
+            <item>b
+              <item>c</item>
+            </item>
+            <item>d</item>
+          </item>
+          <item><date/></item>
+        </content>
+      </slide>
+
+

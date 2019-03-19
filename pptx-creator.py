@@ -266,7 +266,7 @@ class PresentationCreator:
 
     """
 
-    ph_types = {"text", "image", "table"}
+    ph_types = {"text", "image", "table", "list"}
 
 
     def __init__(self, path_pptx, template):
@@ -455,7 +455,7 @@ class PresentationCreator:
                     type_func = getattr(self, "_ph_" + type_vals[0])
                     type_func(ph, prs_ph, self.slides[i])
 
-    def _prs_insert_text(self, entry, prs_object):
+    def _prs_insert_text(self, entry, para, level, prs_object):
         """ Add text to a shape
 
         Process text contained in the PreprocessorEntry and place it in the
@@ -463,16 +463,26 @@ class PresentationCreator:
 
         Args:
             entry: PreprocessorEntry with text data
+            para: Paragraph index to insert text (used with lists)
+            level: indent level used to insert text (used with lists)
             prs_object: presentation object with a text_frame where text is
                 to be inserted
 
+        Return:
+            highest paragraph index where text was inserted
+
         """
 
-        para = prs_object.text_frame.paragraphs[0]
+        # Ensure there are enough paragraphs in textframe to get para index
+        while(len(prs_object.text_frame.paragraphs) < para + 1):
+            prs_object.text_frame.add_paragraph()
+
+        prs_para = prs_object.text_frame.paragraphs[para]
+        prs_para.level = level
 
         for sub in entry.data:
             if (sub.which == "value"):
-                run = para.add_run()
+                run = prs_para.add_run()
 
                 # Try to handle unicode characters
                 try:
@@ -484,12 +494,14 @@ class PresentationCreator:
 
                 continue
 
+            # Add date
             if (sub.tag == "date"):
-                run = para.add_run()
+                run = prs_para.add_run()
                 run.text = datetime.datetime.now().strftime("%B %d, %Y")
 
+            # Add link
             elif (sub.tag == "link"):
-                run = para.add_run()
+                run = prs_para.add_run()
                 run.text = sub.get_values(join=True)
 
                 for sub_link in sub.data:
@@ -519,12 +531,48 @@ class PresentationCreator:
                                 "".format(sub_link.tag, \
                                           self.ppp.error_info(sub_link)))
 
-
+            # Add list item by calling this function recursively
+            elif (sub.tag == "item"):
+                para = self._prs_insert_text(sub, para+1, level+1, prs_object)
 
             else:
                 raise ValueError("invalid \"{}\" entry in text placeholder."\
                         "\n{}".format(sub.tag, self.ppp.error_info(sub)))
 
+        return para
+
+    def _ph_list(self, entry, prs_ph, prs_slide):
+        """ Add list to the placeholder
+
+        Process list contained in the PreprocessorEntry and place it in the
+        prs_ph placeholder on the prs_slide slide.
+
+        Args:
+            entry: PreprocessorEntry with text data
+            prs_ph: presentation placeholder where text is to be inserted
+            prs_slide: presentation slide containing placeholder
+
+        """
+
+        # Start with paragraph 0 and increment as items are added to list
+        para = 0
+
+        for sub in entry.data:
+            if (sub.which == "value"):
+                raise ValueError("invalid value \"{}\" in list "\
+                        "placeholder, expected item element.\n{}"\
+                        "".format(sub.value, self.ppp.error_info(sub)))
+
+            # Valid item element add to list
+            if (sub.tag == "item"):
+                para = self._prs_insert_text(sub, para, 0, prs_ph)
+                para = para + 1
+
+            # Invalid element
+            else:
+                raise ValueError("invalid element \"{}\" in list, "\
+                        "expected item element.\n{}"\
+                        "".format(sub.tag, self.ppp.error_info(sub)))
 
     def _ph_text(self, entry, prs_ph, prs_slide):
         """ Add text to the placeholder
@@ -539,7 +587,7 @@ class PresentationCreator:
 
         """
 
-        self._prs_insert_text(entry, prs_ph)
+        self._prs_insert_text(entry, 0, 0, prs_ph)
 
     def _ph_image(self, entry, prs_ph, prs_slide):
         """ Add image to the placeholder
@@ -795,7 +843,7 @@ class PresentationCreator:
                     continue
 
                 # Add text from element to cell
-                self._prs_insert_text(table[i][j], prs_table.cell(i,j))
+                self._prs_insert_text(table[i][j], 0, 0, prs_table.cell(i,j))
 
         # Set column weights based on text and user request
         tot_weight = 0
