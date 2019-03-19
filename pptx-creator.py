@@ -14,7 +14,11 @@
 #       Initial version.
 #   Version 0.2 (9-12-2018)
 #       Change input file to xml format
-#       Add support for table generation -- TODO
+#       Add support for table generation
+#   Version 0.3 (3-19-2019)
+#       Add support for table row/column sizing
+#       Add support for list generation
+#       Improve space and text handling
 #
 # Description: This file takes an xml file with slide definitions and
 #   creates a powerpoint presentation. The file can specify the format
@@ -23,10 +27,6 @@
 #   on the command line.
 #
 # Example: ./pptx-creator.py -t test/templates/blank -o test/example.pptx test/example.xml
-#
-# TODO
-#   - work on text spacing between different values
-#   - add bulleted list placeholder type
 #
 
 # Force python XML parser not faster C accelerators
@@ -2136,13 +2136,9 @@ class PreprocessorEntry:
         if (text is None):
             return
 
-        # TODO may need to make this more intelligent
-        # Remove all leading and trailing whitespace characters
-        text = text.strip()
-
         # Only add text entry when text is not empty string
-        if (text != ""):
-            self.add_value(text)
+        if (text.strip() != ""):
+            self.add_value(format_whitespace(text))
 
     def get_values(self, tag=None, join=False):
         """ Return value(s) of entry
@@ -2311,6 +2307,72 @@ class LineNumberingParser(ET.XMLParser):
         element._end_column_number = self.parser.CurrentColumnNumber
         element._end_byte_index = self.parser.CurrentByteIndex
         return element
+
+def format_whitespace(string):
+    """ Fix whitespace formatting of multi-line string
+
+    Find the smallest indent whitespace over all lines and remove this
+    from every line. Also remove a newline at the beginning and end of
+    a string.
+
+    """
+    prev_str = None
+
+    my_str = string.splitlines()
+
+    # Don't do anything if this is only a single line
+    if len(my_str) < 2:
+        return string
+
+    # Find smallest leading whitespace
+    for line in my_str:
+        if (line.strip() == ""):
+            continue
+
+        cur_str = ""
+
+        for c in line:
+            if c == " " or c == "/t":
+                cur_str += c
+            else:
+                break
+
+        # Update prev_str to be smallest leading whitespace
+        if not prev_str or len(cur_str) < len(prev_str):
+            prev_str = cur_str
+
+    # Create formatted string
+    ret = ""
+    for i,line in enumerate(my_str):
+
+        # Remove empty lines at beginning and end of string
+        if (line.strip() == ""):
+            if (i == 0):
+                continue
+            elif (i == len(my_str) -1):
+                continue
+
+        # Remove leading prev_string from each line
+        else:
+            line = line.replace(prev_str,"",1)
+
+        # Concat lines together
+        if (ret != ""):
+            ret = ret + "\n"
+        ret = ret + line
+
+    return ret
+
+
+
+
+
+
+            
+            
+
+
+
 
 # Run program
 main()
